@@ -42,9 +42,17 @@ const mitacoConfig = {
     pool: { max: 15, min: 0, idleTimeoutMillis: 30000 }
 };
 
-// Khởi tạo các kết nối Pool
-const authPool = new sql.ConnectionPool(authConfig).connect();
-const mitacoPool = new sql.ConnectionPool(mitacoConfig).connect();
+// Khởi tạo các kết nối Pool và bắt lỗi trực quan
+const authPool = new sql.ConnectionPool(authConfig);
+const mitacoPool = new sql.ConnectionPool(mitacoConfig);
+
+authPool.connect()
+    .then(() => console.log("✅ Đã kết nối thành công Database WebApp_Auth (Phân quyền)"))
+    .catch(err => console.error("❌ LỖI KẾT NỐI DATABASE WebApp_Auth:", err.message));
+
+mitacoPool.connect()
+    .then(() => console.log("✅ Đã kết nối thành công Database MITACOSQL (Chấm công)"))
+    .catch(err => console.error("❌ LỖI KẾT NỐI DATABASE MITACOSQL:", err.message));
 
 // Middleware xác thực Token (Hỗ trợ cả Authorization Header và Cookie)
 const authenticate = (req, res, next) => {
