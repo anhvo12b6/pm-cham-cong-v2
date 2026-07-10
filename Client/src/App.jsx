@@ -11,7 +11,8 @@ const getDefaultApiBase = () => {
   return 'https://pm-cham-cong-v2.onrender.com';
 };
 
-const API_BASE = import.meta.env.VITE_API_BASE || getDefaultApiBase();
+const API_BASE_RAW = import.meta.env.VITE_API_BASE || getDefaultApiBase();
+const API_BASE = API_BASE_RAW.endsWith('/') ? API_BASE_RAW.slice(0, -1) : API_BASE_RAW;
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('token') || '');
