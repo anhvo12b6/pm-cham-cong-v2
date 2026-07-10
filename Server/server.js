@@ -163,7 +163,7 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // [API 1.5]: Đăng nhập thông qua SSO (Single Sign-On từ Workspace)
-app.get('/api/auth/sso/:token', async (req, res) => {
+const handleSSOLogin = async (req, res) => {
     const token = req.params.token;
 
     if (!token) {
@@ -237,7 +237,10 @@ app.get('/api/auth/sso/:token', async (req, res) => {
         const clientUrl = process.env.CLIENT_URL || `http://${clientHost}:5175`;
         res.redirect(`${clientUrl}?sso_error=${encodeURIComponent(err.message)}`);
     }
-});
+};
+
+app.get('/api/auth/sso/:token', handleSSOLogin);
+app.get('/api/auth/sso-login/:token', handleSSOLogin);
 
 // [API 2]: Lấy danh mục phòng ban (Dữ liệu từ MITACOSQL)
 app.get('/api/phong-ban', authenticate, async (req, res) => {
