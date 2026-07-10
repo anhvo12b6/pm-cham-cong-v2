@@ -1,7 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const API_BASE = import.meta.env.VITE_API_BASE || ('http://' + window.location.hostname + ':3000');
+const getDefaultApiBase = () => {
+  const hostname = window.location.hostname;
+  // Nếu chạy dưới local hoặc mạng LAN, trỏ về cổng 3000 nội bộ
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || /^10\./.test(hostname) || /^192\.168\./.test(hostname)) {
+    return 'http://' + hostname + ':3000';
+  }
+  // Nếu chạy online (Vercel), mặc định trỏ thẳng về API Render
+  return 'https://pm-cham-cong-v2.onrender.com';
+};
+
+const API_BASE = import.meta.env.VITE_API_BASE || getDefaultApiBase();
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('token') || '');
