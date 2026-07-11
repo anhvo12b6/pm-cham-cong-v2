@@ -31,17 +31,17 @@ export default function App() {
   const today = new Date();
 
 // Ngày cuối tháng trước
-  const lastDayPreviousMonth = new Date(
+  const FirstDayPreviousMonth = new Date(
     today.getFullYear(),
     today.getMonth(),
-    0
+    1
   );
 
   const formatDate = (date) => {
       return date.toISOString().split("T")[0];
 };
 
-  const [tuNgay, setTuNgay] = useState(formatDate(lastDayPreviousMonth));
+  const [tuNgay, setTuNgay] = useState(formatDate(FirstDayPreviousMonth));
   const [denNgay, setDenNgay] = useState(formatDate(today));
   const [reportData, setReportData] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
