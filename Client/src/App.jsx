@@ -28,8 +28,21 @@ export default function App() {
   const [filteredPhongBans, setFilteredPhongBans] = useState([]);
 
   const [selectedPhong, setSelectedPhong] = useState('');
-  const [tuNgay, setTuNgay] = useState('2026-07-01');
-  const [denNgay, setDenNgay] = useState('2026-07-07');
+  const today = new Date();
+
+// Ngày cuối tháng trước
+  const lastDayPreviousMonth = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    0
+  );
+
+  const formatDate = (date) => {
+      return date.toISOString().split("T")[0];
+};
+
+  const [tuNgay, setTuNgay] = useState(formatDate(lastDayPreviousMonth));
+  const [denNgay, setDenNgay] = useState(formatDate(today));
   const [reportData, setReportData] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 20;
