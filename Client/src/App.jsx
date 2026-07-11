@@ -34,7 +34,7 @@ export default function App() {
   const FirstDayPreviousMonth = new Date(
     today.getFullYear(),
     today.getMonth(),
-    1
+    2
   );
 
   const formatDate = (date) => {
