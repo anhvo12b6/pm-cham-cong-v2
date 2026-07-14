@@ -69,6 +69,53 @@ export default function App() {
   const [newAllowedPhongBan, setNewAllowedPhongBan] = useState([]);
 
   const isManagerOnly = userRoles.includes('Manager') && !userRoles.includes('Admin');
+  const canEdit = userRoles.includes('Admin') || userRoles.includes('Manager');
+
+  // States cho tính năng chỉnh sửa giờ chấm công trực tiếp
+  const [editingKey, setEditingKey] = useState(''); // Định dạng: "MaChamCong_Ngay"
+  const [editGioVao, setEditGioVao] = useState(''); // Định dạng: "HH:mm:ss"
+  const [editGioRa, setEditGioRa] = useState('');   // Định dạng: "HH:mm:ss"
+
+  // States cho tính năng tìm kiếm nhân viên trên báo cáo
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // States quản lý phân quyền và nhật ký thao tác
+  const [authSubTab, setAuthSubTab] = useState('accounts'); // 'accounts' hoặc 'logs'
+  const [actionLogs, setActionLogs] = useState([]);
+
+  // Tự động tìm kiếm nhân viên trên Server khi nhập thông tin tìm kiếm, không bắt buộc chọn phòng ban
+  useEffect(() => {
+    setCurrentPage(1);
+    const q = searchQuery.trim();
+    
+    // Nếu xóa ô tìm kiếm và đã chọn phòng ban, tự động tải lại báo cáo phòng ban
+    if (!q) {
+      if (selectedPhong) {
+        let url = `${API_BASE}/api/bao-cao/phong-ban?maPhongBan=${selectedPhong}&xiNghiep=${selectedXiNghiep}&tuNgay=${tuNgay}&denNgay=${denNgay}`;
+        axios.get(url, {
+          headers: { Authorization: `Bearer ${token}` }
+        }).then(res => {
+          setReportData(res.data);
+        }).catch(err => {
+          console.error("Lỗi tải lại báo cáo:", err);
+        });
+      }
+      return;
+    }
+
+    const delayDebounce = setTimeout(() => {
+      let url = `${API_BASE}/api/bao-cao/phong-ban?tuNgay=${tuNgay}&denNgay=${denNgay}&search=${encodeURIComponent(q)}`;
+      axios.get(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).then(res => {
+        setReportData(res.data);
+      }).catch(err => {
+        console.error("Lỗi tìm kiếm tự động:", err);
+      });
+    }, 400);
+
+    return () => clearTimeout(delayDebounce);
+  }, [searchQuery, tuNgay, denNgay, token]);
 
   // Hàm Đăng Nhập
   const handleLogin = async (e) => {
@@ -195,14 +242,69 @@ export default function App() {
 
   // Gọi API lấy báo cáo công
   const fetchReport = () => {
-    if (!selectedPhong) return alert("Vui lòng chọn phòng ban!");
-    axios.get(`${API_BASE}/api/bao-cao/phong-ban?maPhongBan=${selectedPhong}&xiNghiep=${selectedXiNghiep}&tuNgay=${tuNgay}&denNgay=${denNgay}`, {
+    const q = searchQuery.trim();
+    if (!q && !selectedPhong) return alert("Vui lòng chọn phòng ban hoặc nhập mã/tên nhân viên để tìm kiếm!");
+
+    let url = `${API_BASE}/api/bao-cao/phong-ban?tuNgay=${tuNgay}&denNgay=${denNgay}`;
+    if (q) {
+      url += `&search=${encodeURIComponent(q)}`;
+    } else {
+      url += `&maPhongBan=${selectedPhong}&xiNghiep=${selectedXiNghiep}`;
+    }
+
+    axios.get(url, {
       headers: { Authorization: `Bearer ${token}` }
     }).then(res => {
       setReportData(res.data);
       setCurrentPage(1);
     }).catch(err => {
       alert("Lỗi khi xem báo cáo: " + (err.response?.data?.message || err.message));
+    });
+  };
+
+  // Bắt đầu chỉnh sửa dòng
+  const startEdit = (row) => {
+    setEditingKey(`${row.MaChamCong}_${row.Ngay}`);
+    setEditGioVao(row.GioVao ? row.GioVao.substring(11, 19) : '');
+    setEditGioRa(row.GioRa ? row.GioRa.substring(11, 19) : '');
+  };
+
+  // Lưu chỉnh sửa dòng quẹt thẻ
+  const handleSave = (row) => {
+    const timeRegex = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+
+    if (editGioVao && !timeRegex.test(editGioVao)) {
+      return alert("Giờ vào không đúng định dạng 24h (HH:mm:ss hoặc HH:mm)!");
+    }
+    if (editGioRa && !timeRegex.test(editGioRa)) {
+      return alert("Giờ ra không đúng định dạng 24h (HH:mm:ss hoặc HH:mm)!");
+    }
+
+    const ngayYMD = typeof row.Ngay === 'string' ? row.Ngay.substring(0, 10) : new Date(row.Ngay).toISOString().substring(0, 10);
+    const formatTime = (timeStr) => {
+      if (!timeStr) return null;
+      const formatted = timeStr.length === 5 ? timeStr + ':00' : timeStr;
+      return `${ngayYMD}T${formatted}.000Z`;
+    };
+
+    const gioVaoFull = formatTime(editGioVao);
+    const gioRaFull = formatTime(editGioRa);
+
+    axios.post(`${API_BASE}/api/bao-cao/update-checkin`, {
+      maChamCong: row.MaChamCong,
+      ngay: ngayYMD,
+      gioVao: gioVaoFull,
+      gioRa: gioRaFull
+    }, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    .then(res => {
+      alert(res.data.message || "Cập nhật thành công!");
+      setEditingKey('');
+      fetchReport();
+    })
+    .catch(err => {
+      alert("Lỗi khi cập nhật: " + (err.response?.data?.message || err.message));
     });
   };
 
@@ -262,18 +364,24 @@ export default function App() {
   useEffect(() => {
     if (activeTab !== 'roles' || !token) return;
 
-    axios.get(`${API_BASE}/api/admin/users`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => setUsers(res.data))
-      .catch(err => console.error("Lỗi lấy danh sách user:", err));
+    if (authSubTab === 'accounts') {
+      axios.get(`${API_BASE}/api/admin/users`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(res => setUsers(res.data))
+        .catch(err => console.error("Lỗi lấy danh sách user:", err));
 
-    axios.get(`${API_BASE}/api/admin/roles`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => setRolesList(res.data))
-      .catch(err => console.error("Lỗi lấy danh sách roles:", err));
+      axios.get(`${API_BASE}/api/admin/roles`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(res => setRolesList(res.data))
+        .catch(err => console.error("Lỗi lấy danh sách roles:", err));
 
-    axios.get(`${API_BASE}/api/admin/employees`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => setEmployeesList(res.data))
-      .catch(err => console.error("Lỗi lấy danh sách nhân viên:", err));
-  }, [activeTab, token]);
+      axios.get(`${API_BASE}/api/admin/employees`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(res => setEmployeesList(res.data))
+        .catch(err => console.error("Lỗi lấy danh sách nhân viên:", err));
+    } else if (authSubTab === 'logs') {
+      axios.get(`${API_BASE}/api/admin/action-logs`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(res => setActionLogs(res.data))
+        .catch(err => console.error("Lỗi lấy nhật ký thao tác:", err));
+    }
+  }, [activeTab, authSubTab, token]);
 
   const handleSaveUserAuth = () => {
     if (!editingUser) return;
@@ -365,8 +473,17 @@ export default function App() {
     );
   }
 
-  const totalPages = Math.ceil(reportData.length / pageSize);
-  const currentItems = reportData.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const filteredReportData = reportData.filter(row => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      String(row.MaChamCong).toLowerCase().includes(q) || 
+      row.TenNhanVien.toLowerCase().includes(q)
+    );
+  });
+
+  const totalPages = Math.ceil(filteredReportData.length / pageSize);
+  const currentItems = filteredReportData.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', width: '100%' }}>
@@ -475,13 +592,23 @@ export default function App() {
                   <input type="date" value={denNgay} onChange={e => setDenNgay(e.target.value)} className="filter-input" />
                 </div>
 
+                <div className="filter-group">
+                  <label>Tìm kiếm nhân viên</label>
+                  <input 
+                    type="text" 
+                    placeholder="Tìm theo Mã CC / Tên..." 
+                    value={searchQuery} 
+                    onChange={e => setSearchQuery(e.target.value)} 
+                    className="filter-input"
+                  />
+                </div>
+
                 <button onClick={fetchReport} className="btn-success">Xem báo cáo</button>
                 <button onClick={handleExportExcel} className="btn-excel">Xuất Excel</button>
                 <button onClick={handleExportExcelDetail} className="btn-excel" style={{ backgroundColor: '#0284c7' }} onMouseOver={e => e.currentTarget.style.backgroundColor = '#0369a1'} onMouseOut={e => e.currentTarget.style.backgroundColor = '#0284c7'}>Xuất Chi Tiết</button>
               </div>
             </div>
 
-            {/* BẢNG HIỂN THỊ DỮ LIỆU BÁO CÁO TỨC THỜI */}
             <div className="table-container">
               <table className="report-table">
                 <thead>
@@ -499,11 +626,18 @@ export default function App() {
                     <th>Trạng Thái</th>
                     <th>Khu Vực Vào</th>
                     <th>Khu Vực Ra</th>
+                    {canEdit && <th>Thao tác</th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {reportData.length === 0 ? (
-                    <tr><td colSpan="13" className="empty-state">Không có dữ liệu hiển thị. Hãy chọn bộ lọc và bấm "Xem báo cáo".</td></tr>
+                  {filteredReportData.length === 0 ? (
+                    <tr>
+                      <td colSpan={canEdit ? "14" : "13"} className="empty-state">
+                        {reportData.length === 0 
+                          ? "Không có dữ liệu hiển thị. Hãy chọn bộ lọc và bấm \"Xem báo cáo\"." 
+                          : "Không tìm thấy nhân viên trùng khớp với từ khóa tìm kiếm."}
+                      </td>
+                    </tr>
                   ) : (
                     currentItems.map((row, index) => {
                       let badgeClass = 'badge badge-gray';
@@ -519,6 +653,8 @@ export default function App() {
                         }
                       }
 
+                      const isEditing = editingKey === `${row.MaChamCong}_${row.Ngay}`;
+
                       return (
                         <tr key={index}>
                           <td>{row.MaChamCong}</td>
@@ -527,10 +663,30 @@ export default function App() {
                           <td>{new Date(row.Ngay).toLocaleDateString('vi-VN')}</td>
                           <td>{row.Thu}</td>
                           <td className={row.GioVao ? "text-time-in" : "empty-cell"}>
-                            {row.GioVao ? row.GioVao.substring(11, 19) : '--:--'}
+                            {isEditing ? (
+                              <input 
+                                type="text" 
+                                placeholder="HH:mm:ss"
+                                className="edit-input-time"
+                                value={editGioVao}
+                                onChange={e => setEditGioVao(e.target.value)}
+                              />
+                            ) : (
+                              row.GioVao ? row.GioVao.substring(11, 19) : '--:--'
+                            )}
                           </td>
                           <td className={row.GioRa ? "text-time-out" : "empty-cell"}>
-                            {row.GioRa ? row.GioRa.substring(11, 19) : '--:--'}
+                            {isEditing ? (
+                              <input 
+                                type="text" 
+                                placeholder="HH:mm:ss"
+                                className="edit-input-time"
+                                value={editGioRa}
+                                onChange={e => setEditGioRa(e.target.value)}
+                              />
+                            ) : (
+                              row.GioRa ? row.GioRa.substring(11, 19) : '--:--'
+                            )}
                           </td>
                           <td className="text-cong">{row.Cong}</td>
                           <td>{row.TongGio}</td>
@@ -540,6 +696,18 @@ export default function App() {
                           </td>
                           <td className={row.KhuVucVao ? "" : "empty-cell"}>{row.KhuVucVao || '--'}</td>
                           <td className={row.KhuVucRa ? "" : "empty-cell"}>{row.KhuVucRa || '--'}</td>
+                          {canEdit && (
+                            <td>
+                              {isEditing ? (
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <button onClick={() => handleSave(row)} className="btn-save-row">Lưu</button>
+                                  <button onClick={() => setEditingKey('')} className="btn-cancel-row">Hủy</button>
+                                </div>
+                              ) : (
+                                <button onClick={() => startEdit(row)} className="btn-edit-row">Sửa</button>
+                              )}
+                            </td>
+                          )}
                         </tr>
                       );
                     })
@@ -548,10 +716,10 @@ export default function App() {
               </table>
             </div>
 
-            {reportData.length > 0 && (
+            {filteredReportData.length > 0 && (
               <div className="pagination-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', padding: '0 4px' }}>
                 <span style={{ fontSize: '13px', color: '#6b7280' }}>
-                  Hiển thị {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, reportData.length)} trên tổng số {reportData.length} kết quả
+                  Hiển thị {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, filteredReportData.length)} trên tổng số {filteredReportData.length} kết quả
                 </span>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button
@@ -598,7 +766,47 @@ export default function App() {
         ) : (
           /* GIAO DIỆN QUẢN LÝ PHÂN QUYỀN */
           <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            {/* Thanh Tab phụ quản lý phân quyền & logs */}
+            <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', borderBottom: '1px solid #e5e7eb', paddingBottom: '2px' }}>
+              <button 
+                onClick={() => setAuthSubTab('accounts')}
+                style={{
+                  cursor: 'pointer',
+                  padding: '8px 16px',
+                  fontWeight: authSubTab === 'accounts' ? '600' : '400',
+                  border: 'none',
+                  background: 'none',
+                  borderBottom: authSubTab === 'accounts' ? '3px solid #1b7e3e' : '3px solid transparent',
+                  color: authSubTab === 'accounts' ? '#1b7e3e' : '#4b5563',
+                  fontSize: '14px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                Tài khoản & Phân quyền
+              </button>
+              {userRoles.includes('Admin') && (
+                <button 
+                  onClick={() => setAuthSubTab('logs')}
+                  style={{
+                    cursor: 'pointer',
+                    padding: '8px 16px',
+                    fontWeight: authSubTab === 'logs' ? '600' : '400',
+                    border: 'none',
+                    background: 'none',
+                    borderBottom: authSubTab === 'logs' ? '3px solid #1b7e3e' : '3px solid transparent',
+                    color: authSubTab === 'logs' ? '#1b7e3e' : '#4b5563',
+                    fontSize: '14px',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  Nhật ký thao tác
+                </button>
+              )}
+            </div>
+
+            {authSubTab === 'accounts' ? (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 500, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
                 Danh sách tài khoản hệ thống
               </h3>
@@ -716,7 +924,54 @@ export default function App() {
               </table>
             </div>
           </>
+        ) : userRoles.includes('Admin') ? (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 500, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                Nhật ký thao tác hệ thống
+              </h3>
+            </div>
+
+            <div className="table-container">
+              <table className="report-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: '80px' }}>ID Log</th>
+                    <th style={{ width: '180px' }}>Thời Gian</th>
+                    <th style={{ width: '150px' }}>Tài Khoản Thực Hiện</th>
+                    <th style={{ width: '120px' }}>Loại Thao Tác</th>
+                    <th>Chi Tiết Thao Tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {actionLogs.length === 0 ? (
+                    <tr><td colSpan="5" className="empty-state">Không có lịch sử thao tác nào được ghi nhận.</td></tr>
+                  ) : (
+                    actionLogs.map(log => (
+                      <tr key={log.LogID}>
+                        <td>{log.LogID}</td>
+                        <td>{new Date(log.CreatedAt).toLocaleString('vi-VN')}</td>
+                        <td><strong>{log.Username}</strong></td>
+                        <td>
+                          <span className="badge badge-gray" style={{ color: '#4b5563', border: '1px solid rgba(75, 85, 99, 0.3)' }}>
+                            {log.ActionType}
+                          </span>
+                        </td>
+                        <td style={{ whiteSpace: 'normal', wordBreak: 'break-word', fontSize: '13px' }}>
+                          {log.Details}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <div className="empty-state">Bạn không có quyền truy cập nhật ký thao tác!</div>
         )}
+      </>
+    )}
 
         {/* POPUP MODAL CHỈNH SỬA PHÂN QUYỀN */}
         {editingUser && (

@@ -355,3 +355,64 @@ body {
   font-weight: 500;
   box-sizing: border-box;
 }
+
+/* Inline Editing Styles */
+.edit-input-time {
+  padding: 4px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+  background-color: white;
+  width: 95px;
+  box-sizing: border-box;
+}
+
+.edit-input-time:focus {
+  border-color: var(--primary);
+}
+
+.btn-edit-row {
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.btn-edit-row:hover {
+  background-color: #2563eb;
+}
+
+.btn-save-row {
+  background-color: #10b981;
+  color: white;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.btn-save-row:hover {
+  background-color: #059669;
+}
+
+.btn-cancel-row {
+  background-color: #ef4444;
+  color: white;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.btn-cancel-row:hover {
+  background-color: #dc2626;
+}

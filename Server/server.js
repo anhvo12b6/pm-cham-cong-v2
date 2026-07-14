@@ -47,7 +47,27 @@ const authPool = new sql.ConnectionPool(authConfig);
 const mitacoPool = new sql.ConnectionPool(mitacoConfig);
 
 authPool.connect()
-    .then(() => console.log("✅ Đã kết nối thành công Database WebApp_Auth (Phân quyền)"))
+    .then(async () => {
+        console.log("✅ Đã kết nối thành công Database WebApp_Auth (Phân quyền)");
+        try {
+            await authPool.request().query(`
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Web_ActionLogs')
+                BEGIN
+                    CREATE TABLE Web_ActionLogs (
+                        LogID INT IDENTITY(1,1) PRIMARY KEY,
+                        UserID INT NULL,
+                        Username NVARCHAR(50) NULL,
+                        ActionType NVARCHAR(50) NOT NULL,
+                        Details NVARCHAR(MAX) NULL,
+                        CreatedAt DATETIME DEFAULT GETDATE()
+                    );
+                    PRINT '✅ Đã khởi tạo bảng Web_ActionLogs thành công.';
+                END
+            `);
+        } catch (err) {
+            console.error("❌ Lỗi tự động tạo bảng Web_ActionLogs:", err.message);
+        }
+    })
     .catch(err => console.error("❌ LỖI KẾT NỐI DATABASE WebApp_Auth:", err.message));
 
 mitacoPool.connect()
@@ -412,67 +432,132 @@ app.get('/api/bao-cao/phong-ban', authenticate, async (req, res) => {
 
 
 
-        if (!maPhongBan) {
-            return res.status(400).json({ message: "Thiếu mã phòng ban!" });
-        }
+        let employees = [];
+        let rawCheckins = [];
 
-        // Hỗ trợ truy vấn toàn bộ phòng ban trong Xí nghiệp
-        // Hỗ trợ truy vấn toàn bộ phòng ban trong Xí nghiệp/Khu vực
-        let maPhongBanList = [];
-        if (maPhongBan === 'ALL') {
-            if (!xiNghiep) {
-                return res.status(400).json({ message: "Thiếu tên Khu vực/Xí nghiệp khi chọn tất cả phòng ban!" });
+        const search = req.query.search ? req.query.search.trim() : '';
+
+        if (search) {
+            // Tìm kiếm nhân viên trực tiếp qua Mã CC hoặc Tên nhân viên
+            const searchRequest = pool.request()
+                .input('SearchText', sql.VarChar(50), search)
+                .input('SearchLike', sql.NVarChar(100), `%${search}%`);
+
+            let authFilter = '';
+            if (isManager && !isAdmin) {
+                const cleanAllowedKhuVuc = allowedKhuVuc.map(k => k.trim());
+                const cleanAllowedPhongBan = allowedPhongBan.map(p => p.trim());
+
+                if (cleanAllowedKhuVuc.length === 0 && cleanAllowedPhongBan.length === 0) {
+                    return res.json([]);
+                }
+
+                const kvParams = cleanAllowedKhuVuc.map((_, i) => `@auth_kv_${i}`);
+                const pbParams = cleanAllowedPhongBan.map((_, i) => `@auth_pb_${i}`);
+
+                cleanAllowedKhuVuc.forEach((kv, i) => searchRequest.input(`auth_kv_${i}`, sql.VarChar(50), kv));
+                cleanAllowedPhongBan.forEach((pb, i) => searchRequest.input(`auth_pb_${i}`, sql.VarChar(50), pb));
+
+                const conditions = [];
+                if (kvParams.length > 0) conditions.push(`pb.MaKhuVuc IN (${kvParams.join(', ')})`);
+                if (pbParams.length > 0) conditions.push(`nv.MaPhongBan IN (${pbParams.join(', ')})`);
+
+                authFilter = `AND (${conditions.join(' OR ')})`;
             }
-            
-            // Lấy tất cả phòng ban trực thuộc TenKhuVuc được chọn
-            const depResult = await pool.request()
-                .input('TenKhuVuc', sql.NVarChar(100), xiNghiep)
-                .query(`
-                    SELECT pb.MaPhongBan 
-                    FROM [dbo].[PHONGBAN] pb
-                    INNER JOIN [dbo].[KHUVUC] kv ON pb.MaKhuVuc = kv.MaKhuVuc
-                    WHERE kv.TenKhuVuc = @TenKhuVuc
+
+            const empQuery = `
+                SELECT nv.MaChamCong, nv.TenNhanVien, pb.MaPhongBan, pb.MaKhuVuc, kv.TenKhuVuc
+                FROM [dbo].[NHANVIEN] nv
+                LEFT JOIN [dbo].[PHONGBAN] pb ON nv.MaPhongBan = pb.MaPhongBan
+                LEFT JOIN [dbo].[KHUVUC] kv ON pb.MaKhuVuc = kv.MaKhuVuc
+                WHERE (CAST(nv.MaChamCong AS VARCHAR) = @SearchText OR nv.TenNhanVien LIKE @SearchLike)
+                ${authFilter}
+                ORDER BY nv.TenNhanVien ASC
+            `;
+
+            const employeesResult = await searchRequest.query(empQuery);
+            employees = employeesResult.recordset;
+
+            if (employees.length > 0) {
+                const empIds = employees.map(e => e.MaChamCong);
+                const checkinsRequest = pool.request()
+                    .input('TuNgay', sql.VarChar(10), tuNgay)
+                    .input('DenNgay', sql.VarChar(10), denNgay);
+
+                const idParams = empIds.map((_, i) => `@emp_${i}`);
+                empIds.forEach((id, i) => checkinsRequest.input(`emp_${i}`, sql.Int, id));
+
+                const checkinsResult = await checkinsRequest.query(`
+                    SELECT c.MaChamCong, c.NgayCham, c.GioCham, c.MaSoMay, c.TenMay
+                    FROM [dbo].[CheckInOut] c
+                    WHERE c.MaChamCong IN (${idParams.join(', ')})
+                      AND c.NgayCham BETWEEN CAST(@TuNgay AS DATE) AND CAST(@DenNgay AS DATE)
+                    ORDER BY c.GioCham ASC
                 `);
-            maPhongBanList = depResult.recordset.map(r => r.MaPhongBan.trim());
+                rawCheckins = checkinsResult.recordset;
+            }
         } else {
-            maPhongBanList = [maPhongBan.trim()];
+            if (!maPhongBan) {
+                return res.status(400).json({ message: "Thiếu mã phòng ban!" });
+            }
+
+            // Hỗ trợ truy vấn toàn bộ phòng ban trong Xí nghiệp
+            let maPhongBanList = [];
+            if (maPhongBan === 'ALL') {
+                if (!xiNghiep) {
+                    return res.status(400).json({ message: "Thiếu tên Khu vực/Xí nghiệp khi chọn tất cả phòng ban!" });
+                }
+                
+                // Lấy tất cả phòng ban trực thuộc TenKhuVuc được chọn
+                const depResult = await pool.request()
+                    .input('TenKhuVuc', sql.NVarChar(100), xiNghiep)
+                    .query(`
+                        SELECT pb.MaPhongBan 
+                        FROM [dbo].[PHONGBAN] pb
+                        INNER JOIN [dbo].[KHUVUC] kv ON pb.MaKhuVuc = kv.MaKhuVuc
+                        WHERE kv.TenKhuVuc = @TenKhuVuc
+                    `);
+                maPhongBanList = depResult.recordset.map(r => r.MaPhongBan.trim());
+            } else {
+                maPhongBanList = [maPhongBan.trim()];
+            }
+
+            // 1. Lấy toàn bộ nhân viên thuộc các phòng ban này (Bổ sung thông tin Khu vực)
+            const paramNames = maPhongBanList.map((_, i) => `@pb${i}`);
+            const employeesRequest = pool.request();
+            maPhongBanList.forEach((pb, i) => {
+                employeesRequest.input(`pb${i}`, sql.VarChar(50), pb);
+            });
+
+            const employeesResult = await employeesRequest.query(`
+                SELECT nv.MaChamCong, nv.TenNhanVien, pb.MaKhuVuc, kv.TenKhuVuc
+                FROM [dbo].[NHANVIEN] nv
+                LEFT JOIN [dbo].[PHONGBAN] pb ON nv.MaPhongBan = pb.MaPhongBan
+                LEFT JOIN [dbo].[KHUVUC] kv ON pb.MaKhuVuc = kv.MaKhuVuc
+                WHERE nv.MaPhongBan IN (${paramNames.join(', ')})
+                ORDER BY nv.TenNhanVien ASC
+            `);
+            employees = employeesResult.recordset;
+
+            // 2. Lấy dữ liệu chấm công thô từ CheckInOut cho các nhân viên này trong khoảng ngày
+            const checkinsRequest = pool.request()
+                .input('TuNgay', sql.VarChar(10), tuNgay)
+                .input('DenNgay', sql.VarChar(10), denNgay);
+                
+            maPhongBanList.forEach((pb, i) => {
+                checkinsRequest.input(`pb${i}`, sql.VarChar(50), pb);
+            });
+
+            const checkinsResult = await checkinsRequest.query(`
+                SELECT c.MaChamCong, c.NgayCham, c.GioCham, c.MaSoMay, c.TenMay
+                FROM [dbo].[CheckInOut] c
+                INNER JOIN [dbo].[NHANVIEN] nv ON c.MaChamCong = nv.MaChamCong
+                WHERE nv.MaPhongBan IN (${paramNames.join(', ')})
+                  AND c.NgayCham BETWEEN CAST(@TuNgay AS DATE) AND CAST(@DenNgay AS DATE)
+                ORDER BY c.GioCham ASC
+            `);
+            rawCheckins = checkinsResult.recordset;
         }
-
-        // 1. Lấy toàn bộ nhân viên thuộc các phòng ban này (Bổ sung thông tin Khu vực)
-        const paramNames = maPhongBanList.map((_, i) => `@pb${i}`);
-        const employeesRequest = pool.request();
-        maPhongBanList.forEach((pb, i) => {
-            employeesRequest.input(`pb${i}`, sql.VarChar(50), pb);
-        });
-
-        const employeesResult = await employeesRequest.query(`
-            SELECT nv.MaChamCong, nv.TenNhanVien, pb.MaKhuVuc, kv.TenKhuVuc
-            FROM [dbo].[NHANVIEN] nv
-            LEFT JOIN [dbo].[PHONGBAN] pb ON nv.MaPhongBan = pb.MaPhongBan
-            LEFT JOIN [dbo].[KHUVUC] kv ON pb.MaKhuVuc = kv.MaKhuVuc
-            WHERE nv.MaPhongBan IN (${paramNames.join(', ')})
-            ORDER BY nv.TenNhanVien ASC
-        `);
-        const employees = employeesResult.recordset;
-
-        // 2. Lấy dữ liệu chấm công thô từ CheckInOut cho các nhân viên này trong khoảng ngày
-        const checkinsRequest = pool.request()
-            .input('TuNgay', sql.VarChar(10), tuNgay)
-            .input('DenNgay', sql.VarChar(10), denNgay);
-            
-        maPhongBanList.forEach((pb, i) => {
-            checkinsRequest.input(`pb${i}`, sql.VarChar(50), pb);
-        });
-
-        const checkinsResult = await checkinsRequest.query(`
-            SELECT c.MaChamCong, c.NgayCham, c.GioCham, c.MaSoMay, c.TenMay
-            FROM [dbo].[CheckInOut] c
-            INNER JOIN [dbo].[NHANVIEN] nv ON c.MaChamCong = nv.MaChamCong
-            WHERE nv.MaPhongBan IN (${paramNames.join(', ')})
-              AND c.NgayCham BETWEEN CAST(@TuNgay AS DATE) AND CAST(@DenNgay AS DATE)
-            ORDER BY c.GioCham ASC
-        `);
-        const rawCheckins = checkinsResult.recordset;
 
         // 3. Gom nhóm dữ liệu chấm công theo MaChamCong và NgayCham (sử dụng UTC Date để tránh lệch múi giờ)
         const checkinsMap = {};
@@ -600,6 +685,184 @@ app.get('/api/bao-cao/phong-ban', authenticate, async (req, res) => {
 
         res.json(report);
 
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// [API 3.4]: Cập nhật giờ chấm công vào/ra trực tiếp trong DB gốc [CheckInOut] sử dụng UPDATE
+app.post('/api/bao-cao/update-checkin', authenticate, checkRole(['Admin', 'Manager']), async (req, res) => {
+    const { maChamCong, ngay, gioVao, gioRa } = req.body;
+
+    if (!maChamCong || !ngay) {
+        return res.status(400).json({ message: "Thiếu thông tin Mã chấm công hoặc Ngày!" });
+    }
+
+    try {
+        const pool = await mitacoPool;
+        const transaction = new sql.Transaction(pool);
+        await transaction.begin();
+
+        try {
+            // 1. Lấy danh sách các dòng chấm công hiện tại của nhân viên trong ngày này
+            const selectRequest = new sql.Request(transaction);
+            const selectResult = await selectRequest
+                .input('MaChamCong', sql.Int, maChamCong)
+                .input('NgayCham', sql.VarChar(10), ngay)
+                .query(`
+                    SELECT ID, GioCham, MaSoMay, TenMay 
+                    FROM [dbo].[CheckInOut]
+                    WHERE MaChamCong = @MaChamCong
+                      AND CAST(NgayCham AS DATE) = CAST(@NgayCham AS DATE)
+                    ORDER BY GioCham ASC
+                `);
+            const existing = selectResult.recordset;
+
+            const firstId = existing.length > 0 ? existing[0].ID : null;
+            const lastId = existing.length > 1 ? existing[existing.length - 1].ID : null;
+
+            // 1.5 Xác định thông tin máy quẹt mặc định để chèn bản ghi mới
+            let defaultMaSoMay = 99;
+            let defaultTenMay = 'Web_Edit';
+
+            if (existing.length > 0) {
+                defaultMaSoMay = existing[0].MaSoMay || 99;
+                defaultTenMay = existing[0].TenMay || 'Web_Edit';
+            } else {
+                // Lấy thông tin máy quẹt gần nhất của nhân viên này để gán
+                const lastScanRequest = new sql.Request(transaction);
+                const lastScanResult = await lastScanRequest
+                    .input('MaChamCong', sql.Int, maChamCong)
+                    .query(`
+                        SELECT TOP 1 MaSoMay, TenMay 
+                        FROM [dbo].[CheckInOut]
+                        WHERE MaChamCong = @MaChamCong
+                        ORDER BY GioCham DESC
+                    `);
+                if (lastScanResult.recordset.length > 0) {
+                    defaultMaSoMay = lastScanResult.recordset[0].MaSoMay || 99;
+                    defaultTenMay = lastScanResult.recordset[0].TenMay || 'Web_Edit';
+                }
+            }
+
+            // Helper để INSERT dòng chấm công mới
+            const insertCheckIn = async (gioVal, maSoMay = 99, tenMay = 'Web_Edit') => {
+                const insertRequest = new sql.Request(transaction);
+                await insertRequest
+                    .input('MaChamCong', sql.Int, maChamCong)
+                    .input('NgayCham', sql.VarChar(10), ngay)
+                    .input('GioCham', sql.DateTime, new Date(gioVal))
+                    .input('MaSoMay', sql.Int, maSoMay)
+                    .input('TenMay', sql.NVarChar(30), tenMay)
+                    .query(`
+                        INSERT INTO [dbo].[CheckInOut] (MaChamCong, NgayCham, GioCham, KieuCham, NguonCham, MaSoMay, TenMay)
+                        VALUES (@MaChamCong, CAST(@NgayCham AS DATE), @GioCham, '0', 'WebEdited', @MaSoMay, @TenMay)
+                    `);
+            };
+
+            // Helper để UPDATE dòng chấm công
+            const updateCheckIn = async (id, gioVal) => {
+                const updateRequest = new sql.Request(transaction);
+                await updateRequest
+                    .input('ID', sql.Int, id)
+                    .input('GioCham', sql.DateTime, new Date(gioVal))
+                    .query(`
+                        UPDATE [dbo].[CheckInOut]
+                        SET GioCham = @GioCham, NguonCham = 'WebEdited'
+                        WHERE ID = @ID
+                    `);
+            };
+
+            // Helper để DELETE tất cả trừ ID cụ thể
+            const deleteExcept = async (keepId) => {
+                const deleteRequest = new sql.Request(transaction);
+                await deleteRequest
+                    .input('MaChamCong', sql.Int, maChamCong)
+                    .input('NgayCham', sql.VarChar(10), ngay)
+                    .input('KeepID', sql.Int, keepId)
+                    .query(`
+                        DELETE FROM [dbo].[CheckInOut]
+                        WHERE MaChamCong = @MaChamCong
+                          AND CAST(NgayCham AS DATE) = CAST(@NgayCham AS DATE)
+                          AND ID != @KeepID
+                    `);
+            };
+
+            // 2. Thực hiện logic điều hướng UPDATE / INSERT / DELETE
+            if (gioVao && gioRa) {
+                // Trường hợp có cả Giờ Vào và Giờ Ra
+                if (existing.length === 0) {
+                    await insertCheckIn(gioVao, defaultMaSoMay, defaultTenMay);
+                    await insertCheckIn(gioRa, defaultMaSoMay, defaultTenMay);
+                } else if (existing.length === 1) {
+                    await updateCheckIn(firstId, gioVao);
+                    // Sao chép thông tin máy quẹt từ bản ghi duy nhất hiện tại để đảm bảo tính nhất quán
+                    await insertCheckIn(gioRa, existing[0].MaSoMay, existing[0].TenMay);
+                } else {
+                    await updateCheckIn(firstId, gioVao);
+                    await updateCheckIn(lastId, gioRa);
+                }
+            } else if (gioVao && !gioRa) {
+                // Chỉ có Giờ Vào
+                if (existing.length === 0) {
+                    await insertCheckIn(gioVao, defaultMaSoMay, defaultTenMay);
+                } else if (existing.length === 1) {
+                    await updateCheckIn(firstId, gioVao);
+                } else {
+                    await updateCheckIn(firstId, gioVao);
+                    await deleteExcept(firstId); // Xóa hết các dòng khác để chỉ còn lại giờ Vào
+                }
+            } else if (!gioVao && gioRa) {
+                // Chỉ có Giờ Ra
+                if (existing.length === 0) {
+                    await insertCheckIn(gioRa, defaultMaSoMay, defaultTenMay);
+                } else if (existing.length === 1) {
+                    await updateCheckIn(firstId, gioRa);
+                } else {
+                    await updateCheckIn(lastId, gioRa);
+                    await deleteExcept(lastId); // Xóa hết các dòng khác để chỉ còn lại giờ Ra
+                }
+            } else {
+                // Không có cả hai (Xóa toàn bộ giờ trong ngày của nhân viên đó)
+                const deleteAllRequest = new sql.Request(transaction);
+                await deleteAllRequest
+                    .input('MaChamCong', sql.Int, maChamCong)
+                    .input('NgayCham', sql.VarChar(10), ngay)
+                    .query(`
+                        DELETE FROM [dbo].[CheckInOut]
+                        WHERE MaChamCong = @MaChamCong
+                          AND CAST(NgayCham AS DATE) = CAST(@NgayCham AS DATE)
+                    `);
+            }
+
+            await transaction.commit();
+
+            // 3. Ghi log thao tác lên bảng Web_ActionLogs (WebApp_Auth)
+            try {
+                const logPool = await authPool;
+                const userObj = req.user;
+                const formattedVao = gioVao ? gioVao.substring(11, 19) : 'Trống';
+                const formattedRa = gioRa ? gioRa.substring(11, 19) : 'Trống';
+
+                await logPool.request()
+                    .input('UserID', sql.Int, userObj.userId || null)
+                    .input('Username', sql.NVarChar(50), userObj.username || 'unknown')
+                    .input('ActionType', sql.NVarChar(50), 'UPDATE_CHECKIN')
+                    .input('Details', sql.NVarChar(sql.MAX), `Sửa giờ chấm công nhân viên [Mã CC: ${maChamCong}] ngày ${ngay}. Giờ mới: Vào [${formattedVao}], Ra [${formattedRa}].`)
+                    .query(`
+                        INSERT INTO Web_ActionLogs (UserID, Username, ActionType, Details, CreatedAt)
+                        VALUES (@UserID, @Username, @ActionType, @Details, GETDATE())
+                    `);
+                console.log(`📝 [LOG] User '${userObj.username}' đã cập nhật giờ CC của nhân viên ${maChamCong} ngày ${ngay}`);
+            } catch (logErr) {
+                console.error("❌ Lỗi ghi log thao tác vào Database:", logErr.message);
+            }
+
+            res.json({ message: "Cập nhật giờ chấm công thành công!" });
+        } catch (err) {
+            await transaction.rollback();
+            throw err;
+        }
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -1705,6 +1968,21 @@ app.post('/api/admin/create-user', authenticate, checkRole(['Admin']), async (re
             throw err;
         }
 
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// [API 9]: Lấy danh sách nhật ký thao tác (Audit Logs) của hệ thống - chỉ dành cho Admin
+app.get('/api/admin/action-logs', authenticate, checkRole(['Admin']), async (req, res) => {
+    try {
+        const pool = await authPool;
+        const result = await pool.request().query(`
+            SELECT LogID, UserID, Username, ActionType, Details, CreatedAt 
+            FROM Web_ActionLogs
+            ORDER BY CreatedAt DESC
+        `);
+        res.json(result.recordset);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
