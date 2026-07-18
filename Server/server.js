@@ -728,6 +728,200 @@ app.get("/api/bao-cao/phong-ban", authenticate, async (req, res) => {
   }
 });
 
+// [API 3.4]: Cập nhật giờ chấm công vào/ra trực tiếp trong DB gốc [CheckInOut] sử dụng UPDATE
+app.post(
+  "/api/bao-cao/update-checkin",
+  authenticate,
+  checkRole(["Admin", "Manager"]),
+  async (req, res) => {
+    const { maChamCong, ngay, gioVao, gioRa } = req.body;
+
+    if (!maChamCong || !ngay) {
+      return res
+        .status(400)
+        .json({ message: "Thiếu thông tin Mã chấm công hoặc Ngày!" });
+    }
+
+    try {
+      const pool = await mitacoPool;
+      const transaction = new sql.Transaction(pool);
+      await transaction.begin();
+
+      try {
+        // 1. Lấy danh sách các dòng chấm công hiện tại của nhân viên trong ngày này
+        const selectRequest = new sql.Request(transaction);
+        const selectResult = await selectRequest
+          .input("MaChamCong", sql.Int, maChamCong)
+          .input("NgayCham", sql.VarChar(10), ngay).query(`
+                    SELECT ID, GioCham, MaSoMay, TenMay 
+                    FROM [dbo].[CheckInOut]
+                    WHERE MaChamCong = @MaChamCong
+                      AND CAST(NgayCham AS DATE) = CAST(@NgayCham AS DATE)
+                    ORDER BY GioCham ASC
+                `);
+        const existing = selectResult.recordset;
+
+        const firstId = existing.length > 0 ? existing[0].ID : null;
+        const lastId =
+          existing.length > 1 ? existing[existing.length - 1].ID : null;
+
+        // 1.5 Xác định thông tin máy quẹt mặc định để chèn bản ghi mới
+        let defaultMaSoMay = 99;
+        let defaultTenMay = "Web_Edit";
+
+        if (existing.length > 0) {
+          defaultMaSoMay = existing[0].MaSoMay || 99;
+          defaultTenMay = existing[0].TenMay || "Web_Edit";
+        } else {
+          // Lấy thông tin máy quẹt gần nhất của nhân viên này để gán
+          const lastScanRequest = new sql.Request(transaction);
+          const lastScanResult = await lastScanRequest
+            .input("MaChamCong", sql.Int, maChamCong).query(`
+                        SELECT TOP 1 MaSoMay, TenMay 
+                        FROM [dbo].[CheckInOut]
+                        WHERE MaChamCong = @MaChamCong
+                        ORDER BY GioCham DESC
+                    `);
+          if (lastScanResult.recordset.length > 0) {
+            defaultMaSoMay = lastScanResult.recordset[0].MaSoMay || 99;
+            defaultTenMay = lastScanResult.recordset[0].TenMay || "Web_Edit";
+          }
+        }
+
+        // Helper để INSERT dòng chấm công mới
+        const insertCheckIn = async (
+          gioVal,
+          maSoMay = 99,
+          tenMay = "Web_Edit",
+        ) => {
+          const insertRequest = new sql.Request(transaction);
+          await insertRequest
+            .input("MaChamCong", sql.Int, maChamCong)
+            .input("NgayCham", sql.VarChar(10), ngay)
+            .input("GioCham", sql.DateTime, new Date(gioVal))
+            .input("MaSoMay", sql.Int, maSoMay)
+            .input("TenMay", sql.NVarChar(30), tenMay).query(`
+                        INSERT INTO [dbo].[CheckInOut] (MaChamCong, NgayCham, GioCham, KieuCham, NguonCham, MaSoMay, TenMay)
+                        VALUES (@MaChamCong, CAST(@NgayCham AS DATE), @GioCham, '0', 'WebEdited', @MaSoMay, @TenMay)
+                    `);
+        };
+
+        // Helper để UPDATE dòng chấm công
+        const updateCheckIn = async (id, gioVal) => {
+          const updateRequest = new sql.Request(transaction);
+          await updateRequest
+            .input("ID", sql.Int, id)
+            .input("GioCham", sql.DateTime, new Date(gioVal)).query(`
+                        UPDATE [dbo].[CheckInOut]
+                        SET GioCham = @GioCham, NguonCham = 'WebEdited'
+                        WHERE ID = @ID
+                    `);
+        };
+
+        // Helper để DELETE tất cả trừ ID cụ thể
+        const deleteExcept = async (keepId) => {
+          const deleteRequest = new sql.Request(transaction);
+          await deleteRequest
+            .input("MaChamCong", sql.Int, maChamCong)
+            .input("NgayCham", sql.VarChar(10), ngay)
+            .input("KeepID", sql.Int, keepId).query(`
+                        DELETE FROM [dbo].[CheckInOut]
+                        WHERE MaChamCong = @MaChamCong
+                          AND CAST(NgayCham AS DATE) = CAST(@NgayCham AS DATE)
+                          AND ID != @KeepID
+                    `);
+        };
+
+        // 2. Thực hiện logic điều hướng UPDATE / INSERT / DELETE
+        if (gioVao && gioRa) {
+          // Trường hợp có cả Giờ Vào và Giờ Ra
+          if (existing.length === 0) {
+            await insertCheckIn(gioVao, defaultMaSoMay, defaultTenMay);
+            await insertCheckIn(gioRa, defaultMaSoMay, defaultTenMay);
+          } else if (existing.length === 1) {
+            await updateCheckIn(firstId, gioVao);
+            // Sao chép thông tin máy quẹt từ bản ghi duy nhất hiện tại để đảm bảo tính nhất quán
+            await insertCheckIn(
+              gioRa,
+              existing[0].MaSoMay,
+              existing[0].TenMay,
+            );
+          } else {
+            await updateCheckIn(firstId, gioVao);
+            await updateCheckIn(lastId, gioRa);
+          }
+        } else if (gioVao && !gioRa) {
+          // Chỉ có Giờ Vào
+          if (existing.length === 0) {
+            await insertCheckIn(gioVao, defaultMaSoMay, defaultTenMay);
+          } else if (existing.length === 1) {
+            await updateCheckIn(firstId, gioVao);
+          } else {
+            await updateCheckIn(firstId, gioVao);
+            await deleteExcept(firstId); // Xóa hết các dòng khác để chỉ còn lại giờ Vào
+          }
+        } else if (!gioVao && gioRa) {
+          // Chỉ có Giờ Ra
+          if (existing.length === 0) {
+            await insertCheckIn(gioRa, defaultMaSoMay, defaultTenMay);
+          } else if (existing.length === 1) {
+            await updateCheckIn(firstId, gioRa);
+          } else {
+            await updateCheckIn(lastId, gioRa);
+            await deleteExcept(lastId); // Xóa hết các dòng khác để chỉ còn lại giờ Ra
+          }
+        } else {
+          // Không có cả hai (Xóa toàn bộ giờ trong ngày của nhân viên đó)
+          const deleteAllRequest = new sql.Request(transaction);
+          await deleteAllRequest
+            .input("MaChamCong", sql.Int, maChamCong)
+            .input("NgayCham", sql.VarChar(10), ngay).query(`
+                        DELETE FROM [dbo].[CheckInOut]
+                        WHERE MaChamCong = @MaChamCong
+                          AND CAST(NgayCham AS DATE) = CAST(@NgayCham AS DATE)
+                    `);
+        }
+
+        await transaction.commit();
+
+        // 3. Ghi log thao tác lên bảng Web_ActionLogs (WebApp_Auth)
+        try {
+          const logPool = await authPool;
+          const userObj = req.user;
+          const formattedVao = gioVao ? gioVao.substring(11, 19) : "Trống";
+          const formattedRa = gioRa ? gioRa.substring(11, 19) : "Trống";
+
+          await logPool
+            .request()
+            .input("UserID", sql.Int, userObj.userId || null)
+            .input("Username", sql.NVarChar(50), userObj.username || "unknown")
+            .input("ActionType", sql.NVarChar(50), "UPDATE_CHECKIN")
+            .input(
+              "Details",
+              sql.NVarChar(sql.MAX),
+              `Sửa giờ chấm công nhân viên [Mã CC: ${maChamCong}] ngày ${ngay}. Giờ mới: Vào [${formattedVao}], Ra [${formattedRa}].`,
+            ).query(`
+                        INSERT INTO Web_ActionLogs (UserID, Username, ActionType, Details, CreatedAt)
+                        VALUES (@UserID, @Username, @ActionType, @Details, GETDATE())
+                    `);
+          console.log(
+            `📝 [LOG] User '${userObj.username}' đã cập nhật giờ CC của nhân viên ${maChamCong} ngày ${ngay}`,
+          );
+        } catch (logErr) {
+          console.error("❌ Lỗi ghi log thao tác vào Database:", logErr.message);
+        }
+
+        res.json({ message: "Cập nhật giờ chấm công thành công!" });
+      } catch (err) {
+        await transaction.rollback();
+        throw err;
+      }
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 // [API 3.5]: Xuất báo cáo chấm công ra file Excel (.xlsx) chuẩn biểu mẫu THACO KLH
 app.get("/api/bao-cao/export-excel", authenticate, async (req, res) => {
   let { maPhongBan, xiNghiep, tuNgay, denNgay } = req.query;
@@ -2037,6 +2231,26 @@ app.post(
         }
         throw err;
       }
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// [API 9]: Lấy danh sách nhật ký thao tác (Audit Logs) của hệ thống - chỉ dành cho Admin
+app.get(
+  "/api/admin/action-logs",
+  authenticate,
+  checkRole(["Admin"]),
+  async (req, res) => {
+    try {
+      const pool = await authPool;
+      const result = await pool.request().query(`
+            SELECT LogID, UserID, Username, ActionType, Details, CreatedAt 
+            FROM Web_ActionLogs
+            ORDER BY CreatedAt DESC
+        `);
+      res.json(result.recordset);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

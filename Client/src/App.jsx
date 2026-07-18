@@ -64,6 +64,17 @@ export default function App() {
   const [filterTrangThai, setFilterTrangThai] = useState("all");
   const [maChamCongSearch, setMaChamCongSearch] = useState("");
 
+  const canEdit = userRoles.includes("Admin") || userRoles.includes("Manager");
+
+  // States cho tính năng chỉnh sửa giờ chấm công trực tiếp
+  const [editingKey, setEditingKey] = useState(""); // Định dạng: "MaChamCong_Ngay"
+  const [editGioVao, setEditGioVao] = useState(""); // Định dạng: "HH:mm:ss"
+  const [editGioRa, setEditGioRa] = useState("");   // Định dạng: "HH:mm:ss"
+
+  // States quản lý phân quyền và nhật ký thao tác
+  const [authSubTab, setAuthSubTab] = useState("accounts"); // 'accounts' hoặc 'logs'
+  const [actionLogs, setActionLogs] = useState([]);
+
   // States cho phân quyền (Admin)
   const [activeTab, setActiveTab] = useState("report"); // 'report' hoặc 'roles'
   const [users, setUsers] = useState([]);
@@ -257,6 +268,67 @@ export default function App() {
       });
   };
 
+  // Bắt đầu chỉnh sửa dòng
+  const startEdit = (row) => {
+    setEditingKey(`${row.MaChamCong}_${row.Ngay}`);
+    setEditGioVao(row.GioVao ? row.GioVao.substring(11, 19) : "");
+    setEditGioRa(row.GioRa ? row.GioRa.substring(11, 19) : "");
+  };
+
+  // Lưu chỉnh sửa dòng quẹt thẻ
+  const handleSave = (row) => {
+    const timeRegex = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+
+    if (editGioVao && !timeRegex.test(editGioVao)) {
+      return alert(
+        "Giờ vào không đúng định dạng 24h (HH:mm:ss hoặc HH:mm)!",
+      );
+    }
+    if (editGioRa && !timeRegex.test(editGioRa)) {
+      return alert(
+        "Giờ ra không đúng định dạng 24h (HH:mm:ss hoặc HH:mm)!",
+      );
+    }
+
+    const ngayYMD =
+      typeof row.Ngay === "string"
+        ? row.Ngay.substring(0, 10)
+        : new Date(row.Ngay).toISOString().substring(0, 10);
+    const formatTime = (timeStr) => {
+      if (!timeStr) return null;
+      const formatted = timeStr.length === 5 ? timeStr + ":00" : timeStr;
+      return `${ngayYMD}T${formatted}.000Z`;
+    };
+
+    const gioVaoFull = formatTime(editGioVao);
+    const gioRaFull = formatTime(editGioRa);
+
+    axios
+      .post(
+        `${API_BASE}/api/bao-cao/update-checkin`,
+        {
+          maChamCong: row.MaChamCong,
+          ngay: ngayYMD,
+          gioVao: gioVaoFull,
+          gioRa: gioRaFull,
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      )
+      .then((res) => {
+        alert(res.data.message || "Cập nhật thành công!");
+        setEditingKey("");
+        fetchReport();
+      })
+      .catch((err) => {
+        alert(
+          "Lỗi khi cập nhật: " +
+            (err.response?.data?.message || err.message),
+        );
+      });
+  };
+
   // Filter client-side trên dữ liệu đã load
   const filteredReportData = useMemo(() => {
     return reportData.filter((row) => {
@@ -355,27 +427,36 @@ export default function App() {
   useEffect(() => {
     if (activeTab !== "roles" || !token) return;
 
-    axios
-      .get(`${API_BASE}/api/admin/users`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      .then((res) => setUsers(res.data))
-      .catch((err) => console.error("Lỗi lấy danh sách user:", err));
+    if (authSubTab === "accounts") {
+      axios
+        .get(`${API_BASE}/api/admin/users`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        .then((res) => setUsers(res.data))
+        .catch((err) => console.error("Lỗi lấy danh sách user:", err));
 
-    axios
-      .get(`${API_BASE}/api/admin/roles`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      .then((res) => setRolesList(res.data))
-      .catch((err) => console.error("Lỗi lấy danh sách roles:", err));
+      axios
+        .get(`${API_BASE}/api/admin/roles`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        .then((res) => setRolesList(res.data))
+        .catch((err) => console.error("Lỗi lấy danh sách roles:", err));
 
-    axios
-      .get(`${API_BASE}/api/admin/employees`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      .then((res) => setEmployeesList(res.data))
-      .catch((err) => console.error("Lỗi lấy danh sách nhân viên:", err));
-  }, [activeTab, token]);
+      axios
+        .get(`${API_BASE}/api/admin/employees`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        .then((res) => setEmployeesList(res.data))
+        .catch((err) => console.error("Lỗi lấy danh sách nhân viên:", err));
+    } else if (authSubTab === "logs") {
+      axios
+        .get(`${API_BASE}/api/admin/action-logs`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        .then((res) => setActionLogs(res.data))
+        .catch((err) => console.error("Lỗi lấy nhật ký thao tác:", err));
+    }
+  }, [activeTab, authSubTab, token]);
 
   const handleSaveUserAuth = () => {
     if (!editingUser) return;
@@ -636,10 +717,10 @@ export default function App() {
                 </div>
 
                 <div className="filter-group">
-                  <label>Mã chấm công</label>
+                  <label>Mã nhân viên</label>
                   <input
                     type="text"
-                    placeholder="Nhập mã CC để tìm kiếm..."
+                    placeholder="Nhập mã nhân viên để tìm kiếm..."
                     value={maChamCongSearch}
                     onChange={(e) => setMaChamCongSearch(e.target.value)}
                     className="filter-input"
@@ -708,7 +789,7 @@ export default function App() {
               <table className="report-table">
                 <thead>
                   <tr>
-                    <th>Mã CC</th>
+                    <th>Mã NV</th>
                     <th>Tên Nhân Viên</th>
                     <th>Khu Vực</th> {/* Thêm Header Khu Vực */}
                     <th>Ngày</th>
@@ -721,12 +802,13 @@ export default function App() {
                     <th>Trạng Thái</th>
                     <th>Khu Vực Vào</th>
                     <th>Khu Vực Ra</th>
+                    {canEdit && <th>Thao tác</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {filteredReportData.length === 0 ? (
                     <tr>
-                      <td colSpan="13" className="empty-state">
+                      <td colSpan={canEdit ? "14" : "13"} className="empty-state">
                         Không có dữ liệu hiển thị. Hãy chọn bộ lọc và bấm "Xem
                         báo cáo".
                       </td>
@@ -746,6 +828,8 @@ export default function App() {
                         }
                       }
 
+                      const isEditing = editingKey === `${row.MaChamCong}_${row.Ngay}`;
+
                       return (
                         <tr key={index}>
                           <td>{row.MaChamCong}</td>
@@ -763,16 +847,36 @@ export default function App() {
                               row.GioVao ? "text-time-in" : "empty-cell"
                             }
                           >
-                            {row.GioVao
-                              ? row.GioVao.substring(11, 19)
-                              : "--:--"}
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                placeholder="HH:mm:ss"
+                                className="edit-input-time"
+                                value={editGioVao}
+                                onChange={(e) => setEditGioVao(e.target.value)}
+                              />
+                            ) : (
+                              row.GioVao
+                                ? row.GioVao.substring(11, 19)
+                                : "--:--"
+                            )}
                           </td>
                           <td
                             className={
                               row.GioRa ? "text-time-out" : "empty-cell"
                             }
                           >
-                            {row.GioRa ? row.GioRa.substring(11, 19) : "--:--"}
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                placeholder="HH:mm:ss"
+                                className="edit-input-time"
+                                value={editGioRa}
+                                onChange={(e) => setEditGioRa(e.target.value)}
+                              />
+                            ) : (
+                              row.GioRa ? row.GioRa.substring(11, 19) : "--:--"
+                            )}
                           </td>
                           <td className="text-cong">{row.Cong}</td>
                           <td>{row.TongGio}</td>
@@ -797,6 +901,33 @@ export default function App() {
                           <td className={row.KhuVucRa ? "" : "empty-cell"}>
                             {row.KhuVucRa || "--"}
                           </td>
+                          {canEdit && (
+                            <td>
+                              {isEditing ? (
+                                <div style={{ display: "flex", gap: "6px" }}>
+                                  <button
+                                    onClick={() => handleSave(row)}
+                                    className="btn-save-row"
+                                  >
+                                    Lưu
+                                  </button>
+                                  <button
+                                    onClick={() => setEditingKey("")}
+                                    className="btn-cancel-row"
+                                  >
+                                    Hủy
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => startEdit(row)}
+                                  className="btn-edit-row"
+                                >
+                                  Sửa
+                                </button>
+                              )}
+                            </td>
+                          )}
                         </tr>
                       );
                     })
@@ -885,196 +1016,283 @@ export default function App() {
         ) : (
           /* GIAO DIỆN QUẢN LÝ PHÂN QUYỀN */
           <>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "16px",
-              }}
-            >
-              <h3
+            {/* Thanh Tab phụ quản lý phân quyền & logs */}
+            <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', borderBottom: '1px solid #e5e7eb', paddingBottom: '2px' }}>
+              <button 
+                onClick={() => setAuthSubTab('accounts')}
                 style={{
-                  margin: 0,
-                  fontSize: "15px",
-                  fontWeight: 500,
-                  color: "#374151",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.03em",
+                  cursor: 'pointer',
+                  padding: '8px 16px',
+                  fontWeight: authSubTab === 'accounts' ? '600' : '400',
+                  border: 'none',
+                  background: 'none',
+                  borderBottom: authSubTab === 'accounts' ? '3px solid #1b7e3e' : '3px solid transparent',
+                  color: authSubTab === 'accounts' ? '#1b7e3e' : '#4b5563',
+                  fontSize: '14px',
+                  transition: 'all 0.15s ease'
                 }}
               >
-                Danh sách tài khoản hệ thống
-              </h3>
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="btn-success"
-                style={{ height: "36px", padding: "0 16px", fontSize: "13px" }}
-              >
-                Thêm tài khoản mới
+                Tài khoản & Phân quyền
               </button>
+              {userRoles.includes('Admin') && (
+                <button 
+                  onClick={() => setAuthSubTab('logs')}
+                  style={{
+                    cursor: 'pointer',
+                    padding: '8px 16px',
+                    fontWeight: authSubTab === 'logs' ? '600' : '400',
+                    border: 'none',
+                    background: 'none',
+                    borderBottom: authSubTab === 'logs' ? '3px solid #1b7e3e' : '3px solid transparent',
+                    color: authSubTab === 'logs' ? '#1b7e3e' : '#4b5563',
+                    fontSize: '14px',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  Nhật ký thao tác
+                </button>
+              )}
             </div>
 
-            <div className="table-container">
-              <table className="report-table">
-                <thead>
-                  <tr>
-                    <th>Tên Đăng Nhập</th>
-                    <th>Họ Và Tên</th>
-                    <th>Nhân Viên Chấm Công</th>
-                    <th>Vai Trò (Roles)</th>
-                    <th>Quyền Xem Bộ Phận</th>
-                    <th>Hành Động</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.length === 0 ? (
-                    <tr>
-                      <td colSpan="6" className="empty-state">
-                        Đang tải danh sách người dùng...
-                      </td>
-                    </tr>
-                  ) : (
-                    users.map((u) => {
-                      const linkedEmp = employeesList.find(
-                        (emp) => emp.MaChamCong === u.MaChamCong,
-                      );
-                      const displayEmp = linkedEmp
-                        ? `${linkedEmp.TenNhanVien} (${u.MaChamCong} - ${linkedEmp.TenPhongBan || "Không rõ phòng"}${linkedEmp.TenKhuVuc ? ` | ${linkedEmp.TenKhuVuc.trim()}` : ""})`
-                        : u.MaChamCong
-                          ? `Mã CC: ${u.MaChamCong}`
-                          : "--";
+            {authSubTab === 'accounts' ? (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: "16px",
+                  }}
+                >
+                  <h3
+                    style={{
+                      margin: 0,
+                      fontSize: "15px",
+                      fontWeight: 500,
+                      color: "#374151",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.03em",
+                    }}
+                  >
+                    Danh sách tài khoản hệ thống
+                  </h3>
+                  <button
+                    onClick={() => setShowCreateModal(true)}
+                    className="btn-success"
+                    style={{ height: "36px", padding: "0 16px", fontSize: "13px" }}
+                  >
+                    Thêm tài khoản mới
+                  </button>
+                </div>
 
-                      let parsedKVs = [];
-                      let parsedPBs = [];
-                      try {
-                        parsedKVs = JSON.parse(u.AllowedKhuVuc || "[]");
-                      } catch (e) {}
-                      try {
-                        parsedPBs = JSON.parse(u.AllowedPhongBan || "[]");
-                      } catch (e) {}
-
-                      const isUserAdmin = u.roles.some(
-                        (r) => r.roleName === "Admin",
-                      );
-
-                      return (
-                        <tr key={u.UserID}>
-                          <td>{u.Username}</td>
-                          <td>{u.FullName}</td>
-                          <td>{displayEmp}</td>
-                          <td>
-                            {u.roles.map((r) => (
-                              <span
-                                key={r.roleId}
-                                className="badge badge-success"
-                                style={{ marginRight: "6px" }}
-                              >
-                                {r.roleName}
-                              </span>
-                            ))}
-                            {u.roles.length === 0 && (
-                              <span className="badge badge-gray">Staff</span>
-                            )}
-                          </td>
-                          <td>
-                            {isUserAdmin ? (
-                              <span
-                                className="badge badge-success"
-                                style={{ backgroundColor: "#16a34a" }}
-                              >
-                                Tất cả hệ thống
-                              </span>
-                            ) : (
-                              <>
-                                {parsedKVs.map((kv) => {
-                                  const kvName =
-                                    phongBans.find(
-                                      (p) =>
-                                        p.MaKhuVuc &&
-                                        p.MaKhuVuc.trim() === kv.trim(),
-                                    )?.TenKhuVuc || kv;
-                                  return (
-                                    <span
-                                      key={kv}
-                                      className="badge badge-primary"
-                                      style={{
-                                        marginRight: "4px",
-                                        backgroundColor: "#0284c7",
-                                      }}
-                                    >
-                                      Khối: {kvName.replace("XN ", "")}
-                                    </span>
-                                  );
-                                })}
-                                {parsedPBs.map((pb) => {
-                                  const pbName =
-                                    phongBans.find(
-                                      (p) => p.MaPhongBan.trim() === pb.trim(),
-                                    )?.TenPhongBan || pb;
-                                  return (
-                                    <span
-                                      key={pb}
-                                      className="badge badge-warning"
-                                      style={{
-                                        marginRight: "4px",
-                                        backgroundColor: "#ca8a04",
-                                      }}
-                                    >
-                                      PB: {pbName}
-                                    </span>
-                                  );
-                                })}
-                                {parsedKVs.length === 0 &&
-                                  parsedPBs.length === 0 && (
-                                    <span
-                                      style={{
-                                        color: "#9ca3af",
-                                        fontSize: "13px",
-                                      }}
-                                    >
-                                      Chưa phân quyền
-                                    </span>
-                                  )}
-                              </>
-                            )}
-                          </td>
-                          <td>
-                            <button
-                              onClick={() => {
-                                setEditingUser(u);
-                                setEditRoleIds(u.roles.map((r) => r.roleId));
-                                setEditMaChamCong(u.MaChamCong || "");
-                                setEditAllowedKhuVuc(parsedKVs);
-                                setEditAllowedPhongBan(parsedPBs);
-                              }}
-                              style={{
-                                padding: "6px 12px",
-                                background: "#ffffff",
-                                border: "1px solid #d1d5db",
-                                borderRadius: "6px",
-                                cursor: "pointer",
-                                fontSize: "13px",
-                                transition: "all 0.15s ease",
-                              }}
-                              onMouseOver={(e) =>
-                                (e.currentTarget.style.backgroundColor =
-                                  "#f9fafb")
-                              }
-                              onMouseOut={(e) =>
-                                (e.currentTarget.style.backgroundColor =
-                                  "#ffffff")
-                              }
-                            >
-                              Chỉnh sửa
-                            </button>
+                <div className="table-container">
+                  <table className="report-table">
+                    <thead>
+                      <tr>
+                        <th>Tên Đăng Nhập</th>
+                        <th>Họ Và Tên</th>
+                        <th>Nhân Viên Chấm Công</th>
+                        <th>Vai Trò (Roles)</th>
+                        <th>Quyền Xem Bộ Phận</th>
+                        <th>Hành Động</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {users.length === 0 ? (
+                        <tr>
+                          <td colSpan="6" className="empty-state">
+                            Đang tải danh sách người dùng...
                           </td>
                         </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                      ) : (
+                        users.map((u) => {
+                          const linkedEmp = employeesList.find(
+                            (emp) => emp.MaChamCong === u.MaChamCong,
+                          );
+                          const displayEmp = linkedEmp
+                            ? `${linkedEmp.TenNhanVien} (${u.MaChamCong} - ${linkedEmp.TenPhongBan || "Không rõ phòng"}${linkedEmp.TenKhuVuc ? ` | ${linkedEmp.TenKhuVuc.trim()}` : ""})`
+                            : u.MaChamCong
+                              ? `Mã CC: ${u.MaChamCong}`
+                              : "--";
+
+                          let parsedKVs = [];
+                          let parsedPBs = [];
+                          try {
+                            parsedKVs = JSON.parse(u.AllowedKhuVuc || "[]");
+                          } catch (e) {}
+                          try {
+                            parsedPBs = JSON.parse(u.AllowedPhongBan || "[]");
+                          } catch (e) {}
+
+                          const isUserAdmin = u.roles.some(
+                            (r) => r.roleName === "Admin",
+                          );
+
+                          return (
+                            <tr key={u.UserID}>
+                              <td>{u.Username}</td>
+                              <td>{u.FullName}</td>
+                              <td>{displayEmp}</td>
+                              <td>
+                                {u.roles.map((r) => (
+                                  <span
+                                    key={r.roleId}
+                                    className="badge badge-success"
+                                    style={{ marginRight: "6px" }}
+                                  >
+                                    {r.roleName}
+                                  </span>
+                                ))}
+                                {u.roles.length === 0 && (
+                                  <span className="badge badge-gray">Staff</span>
+                                )}
+                              </td>
+                              <td>
+                                {isUserAdmin ? (
+                                  <span
+                                    className="badge badge-success"
+                                    style={{ backgroundColor: "#16a34a" }}
+                                  >
+                                    Tất cả hệ thống
+                                  </span>
+                                ) : (
+                                  <>
+                                    {parsedKVs.map((kv) => {
+                                      const kvName =
+                                        phongBans.find(
+                                          (p) =>
+                                            p.MaKhuVuc &&
+                                            p.MaKhuVuc.trim() === kv.trim(),
+                                        )?.TenKhuVuc || kv;
+                                      return (
+                                        <span
+                                          key={kv}
+                                          className="badge badge-primary"
+                                          style={{
+                                            marginRight: "4px",
+                                            backgroundColor: "#0284c7",
+                                          }}
+                                        >
+                                          Khối: {kvName.replace("XN ", "")}
+                                        </span>
+                                      );
+                                    })}
+                                    {parsedPBs.map((pb) => {
+                                      const pbName =
+                                        phongBans.find(
+                                          (p) => p.MaPhongBan.trim() === pb.trim(),
+                                        )?.TenPhongBan || pb;
+                                      return (
+                                        <span
+                                          key={pb}
+                                          className="badge badge-warning"
+                                          style={{
+                                            marginRight: "4px",
+                                            backgroundColor: "#ca8a04",
+                                          }}
+                                        >
+                                          PB: {pbName}
+                                        </span>
+                                      );
+                                    })}
+                                    {parsedKVs.length === 0 &&
+                                      parsedPBs.length === 0 && (
+                                        <span
+                                          style={{
+                                            color: "#9ca3af",
+                                            fontSize: "13px",
+                                          }}
+                                        >
+                                          Chưa phân quyền
+                                        </span>
+                                      )}
+                                  </>
+                                )}
+                              </td>
+                              <td>
+                                <button
+                                  onClick={() => {
+                                    setEditingUser(u);
+                                    setEditRoleIds(u.roles.map((r) => r.roleId));
+                                    setEditMaChamCong(u.MaChamCong || "");
+                                    setEditAllowedKhuVuc(parsedKVs);
+                                    setEditAllowedPhongBan(parsedPBs);
+                                  }}
+                                  style={{
+                                    padding: "6px 12px",
+                                    background: "#ffffff",
+                                    border: "1px solid #d1d5db",
+                                    borderRadius: "6px",
+                                    cursor: "pointer",
+                                    fontSize: "13px",
+                                    transition: "all 0.15s ease",
+                                  }}
+                                  onMouseOver={(e) =>
+                                    (e.currentTarget.style.backgroundColor =
+                                      "#f9fafb")
+                                  }
+                                  onMouseOut={(e) =>
+                                    (e.currentTarget.style.backgroundColor =
+                                      "#ffffff")
+                                  }
+                                >
+                                  Chỉnh sửa
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : userRoles.includes('Admin') ? (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 500, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                    Nhật ký thao tác hệ thống
+                  </h3>
+                </div>
+
+                <div className="table-container">
+                  <table className="report-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: '80px' }}>ID Log</th>
+                        <th style={{ width: '180px' }}>Thời Gian</th>
+                        <th style={{ width: '150px' }}>Tài Khoản Thực Hiện</th>
+                        <th style={{ width: '120px' }}>Loại Thao Tác</th>
+                        <th>Chi Tiết Thao Tác</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {actionLogs.length === 0 ? (
+                        <tr><td colSpan="5" className="empty-state">Không có lịch sử thao tác nào được ghi nhận.</td></tr>
+                      ) : (
+                        actionLogs.map(log => (
+                          <tr key={log.LogID}>
+                            <td>{log.LogID}</td>
+                            <td>{new Date(log.CreatedAt).toLocaleString('vi-VN')}</td>
+                            <td><strong>{log.Username}</strong></td>
+                            <td>
+                              <span className="badge badge-gray" style={{ color: '#4b5563', border: '1px solid rgba(75, 85, 99, 0.3)' }}>
+                                {log.ActionType}
+                              </span>
+                            </td>
+                            <td style={{ whiteSpace: 'normal', wordBreak: 'break-word', fontSize: '13px' }}>
+                              {log.Details}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <div className="empty-state">Bạn không có quyền truy cập nhật ký thao tác!</div>
+            )}
           </>
         )}
 
