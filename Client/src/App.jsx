@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 
 const getDefaultApiBase = () => {
@@ -229,7 +229,7 @@ export default function App() {
     }
   }, [selectedXiNghiep, phongBans]);
 
-  // Gọi API lấy báo cáo công
+  // Gọi API lấy báo cáo công (lấy dữ liệu gốc, filter sẽ xử lý ở frontend)
   const fetchReport = () => {
     if (!selectedPhong) return alert("Vui lòng chọn phòng ban!");
 
@@ -238,11 +238,6 @@ export default function App() {
       xiNghiep: selectedXiNghiep || "",
       tuNgay,
       denNgay,
-      trangThai: filterTrangThai || "all",
-      gioVaoTu: filterGioVaoTu || "",
-      gioVaoDen: filterGioVaoDen || "",
-      gioRaTu: filterGioRaTu || "",
-      gioRaDen: filterGioRaDen || "",
     });
 
     axios
@@ -260,6 +255,75 @@ export default function App() {
         );
       });
   };
+
+  // Filter client-side trên dữ liệu đã load
+  const filteredReportData = useMemo(() => {
+    const parseTimeToMinutes = (timeStr) => {
+      if (!timeStr) return null;
+      const [h, m] = timeStr.split(":").map(Number);
+      if (Number.isNaN(h) || Number.isNaN(m)) return null;
+      return h * 60 + m;
+    };
+
+    const getMinutesFromDateTimeString = (dateTimeStr) => {
+      if (!dateTimeStr) return null;
+      const d = new Date(dateTimeStr);
+      if (Number.isNaN(d.getTime())) return null;
+      return d.getHours() * 60 + d.getMinutes();
+    };
+
+    const gioVaoTuMin = parseTimeToMinutes(filterGioVaoTu);
+    const gioVaoDenMin = parseTimeToMinutes(filterGioVaoDen);
+    const gioRaTuMin = parseTimeToMinutes(filterGioRaTu);
+    const gioRaDenMin = parseTimeToMinutes(filterGioRaDen);
+
+    return reportData.filter((row) => {
+      // 1) Filter trạng thái
+      let matchTrangThai = true;
+      if (filterTrangThai === "dung_gio") {
+        matchTrangThai =
+          typeof row.TrangThai === "string" &&
+          row.TrangThai.startsWith("Đúng giờ");
+      } else if (filterTrangThai === "di_tre") {
+        matchTrangThai =
+          typeof row.TrangThai === "string" && row.TrangThai.includes("Trễ");
+      } else if (filterTrangThai === "vang") {
+        matchTrangThai = row.TrangThai === "Vắng";
+      } else if (filterTrangThai === "thieu_ra") {
+        matchTrangThai =
+          typeof row.TrangThai === "string" &&
+          row.TrangThai.includes("Thiếu ra");
+      }
+      if (!matchTrangThai) return false;
+
+      // 2) Filter giờ vào
+      const gioVaoMin = getMinutesFromDateTimeString(row.GioVao);
+      if (gioVaoTuMin !== null) {
+        if (gioVaoMin === null || gioVaoMin < gioVaoTuMin) return false;
+      }
+      if (gioVaoDenMin !== null) {
+        if (gioVaoMin === null || gioVaoMin > gioVaoDenMin) return false;
+      }
+
+      // 3) Filter giờ ra
+      const gioRaMin = getMinutesFromDateTimeString(row.GioRa);
+      if (gioRaTuMin !== null) {
+        if (gioRaMin === null || gioRaMin < gioRaTuMin) return false;
+      }
+      if (gioRaDenMin !== null) {
+        if (gioRaMin === null || gioRaMin > gioRaDenMin) return false;
+      }
+
+      return true;
+    });
+  }, [
+    reportData,
+    filterTrangThai,
+    filterGioVaoTu,
+    filterGioVaoDen,
+    filterGioRaTu,
+    filterGioRaDen,
+  ]);
 
   // Xuất báo cáo công ra file Excel chuẩn biểu mẫu
   const handleExportExcel = () => {
@@ -483,8 +547,8 @@ export default function App() {
     );
   }
 
-  const totalPages = Math.ceil(reportData.length / pageSize);
-  const currentItems = reportData.slice(
+  const totalPages = Math.ceil(filteredReportData.length / pageSize);
+  const currentItems = filteredReportData.slice(
     (currentPage - 1) * pageSize,
     currentPage * pageSize,
   );
@@ -735,7 +799,7 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {reportData.length === 0 ? (
+                  {filteredReportData.length === 0 ? (
                     <tr>
                       <td colSpan="13" className="empty-state">
                         Không có dữ liệu hiển thị. Hãy chọn bộ lọc và bấm "Xem
@@ -816,7 +880,7 @@ export default function App() {
               </table>
             </div>
 
-            {reportData.length > 0 && (
+            {filteredReportData.length > 0 && (
               <div
                 className="pagination-bar"
                 style={{
@@ -829,8 +893,8 @@ export default function App() {
               >
                 <span style={{ fontSize: "13px", color: "#6b7280" }}>
                   Hiển thị {(currentPage - 1) * pageSize + 1} -{" "}
-                  {Math.min(currentPage * pageSize, reportData.length)} trên
-                  tổng số {reportData.length} kết quả
+                  {Math.min(currentPage * pageSize, filteredReportData.length)}{" "}
+                  trên tổng số {filteredReportData.length} kết quả
                 </span>
                 <div style={{ display: "flex", gap: "8px" }}>
                   <button
