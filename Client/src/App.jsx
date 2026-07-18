@@ -62,6 +62,7 @@ export default function App() {
 
   // Filter nâng cao báo cáo
   const [filterTrangThai, setFilterTrangThai] = useState("all");
+  const [maChamCongSearch, setMaChamCongSearch] = useState("");
 
   // States cho phân quyền (Admin)
   const [activeTab, setActiveTab] = useState("report"); // 'report' hoặc 'roles'
@@ -227,14 +228,18 @@ export default function App() {
 
   // Gọi API lấy báo cáo công (lấy dữ liệu gốc, filter sẽ xử lý ở frontend)
   const fetchReport = () => {
-    if (!selectedPhong) return alert("Vui lòng chọn phòng ban!");
+    const maChamCong = maChamCongSearch.trim();
+    if (!maChamCong && !selectedPhong) {
+      return alert("Vui lòng chọn phòng ban hoặc nhập mã chấm công!");
+    }
 
-    const params = new URLSearchParams({
-      maPhongBan: selectedPhong,
-      xiNghiep: selectedXiNghiep || "",
-      tuNgay,
-      denNgay,
-    });
+    const params = new URLSearchParams({ tuNgay, denNgay });
+    if (maChamCong) {
+      params.set("maChamCong", maChamCong);
+    } else {
+      params.set("maPhongBan", selectedPhong);
+      params.set("xiNghiep", selectedXiNghiep || "");
+    }
 
     axios
       .get(`${API_BASE}/api/bao-cao/phong-ban?${params.toString()}`, {
@@ -628,6 +633,17 @@ export default function App() {
                       ))}
                     </select>
                   )}
+                </div>
+
+                <div className="filter-group">
+                  <label>Mã chấm công</label>
+                  <input
+                    type="text"
+                    placeholder="Nhập mã CC để tìm kiếm..."
+                    value={maChamCongSearch}
+                    onChange={(e) => setMaChamCongSearch(e.target.value)}
+                    className="filter-input"
+                  />
                 </div>
 
                 <div className="filter-group">
