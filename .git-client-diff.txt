@@ -1,0 +1,412 @@
+﻿diff --git a/Client/src/App.jsx b/Client/src/App.jsx
+index 6b65e06..3c550ea 100644
+--- a/Client/src/App.jsx
++++ b/Client/src/App.jsx
+@@ -69,6 +69,53 @@ export default function App() {
+   const [newAllowedPhongBan, setNewAllowedPhongBan] = useState([]);
+ 
+   const isManagerOnly = userRoles.includes('Manager') && !userRoles.includes('Admin');
++  const canEdit = userRoles.includes('Admin') || userRoles.includes('Manager');
++
++  // States cho t├¡nh n─âng chß╗ënh sß╗¡a giß╗¥ chß║Ñm c├┤ng trß╗▒c tiß║┐p
++  const [editingKey, setEditingKey] = useState(''); // ─Éß╗ïnh dß║íng: "MaChamCong_Ngay"
++  const [editGioVao, setEditGioVao] = useState(''); // ─Éß╗ïnh dß║íng: "HH:mm:ss"
++  const [editGioRa, setEditGioRa] = useState('');   // ─Éß╗ïnh dß║íng: "HH:mm:ss"
++
++  // States cho t├¡nh n─âng t├¼m kiß║┐m nh├ón vi├¬n tr├¬n b├ío c├ío
++  const [searchQuery, setSearchQuery] = useState('');
++
++  // States quß║ún l├╜ ph├ón quyß╗ün v├á nhß║¡t k├╜ thao t├íc
++  const [authSubTab, setAuthSubTab] = useState('accounts'); // 'accounts' hoß║╖c 'logs'
++  const [actionLogs, setActionLogs] = useState([]);
++
++  // Tß╗▒ ─æß╗Öng t├¼m kiß║┐m nh├ón vi├¬n tr├¬n Server khi nhß║¡p th├┤ng tin t├¼m kiß║┐m, kh├┤ng bß║»t buß╗Öc chß╗ìn ph├▓ng ban
++  useEffect(() => {
++    setCurrentPage(1);
++    const q = searchQuery.trim();
++    
++    // Nß║┐u x├│a ├┤ t├¼m kiß║┐m v├á ─æ├ú chß╗ìn ph├▓ng ban, tß╗▒ ─æß╗Öng tß║úi lß║íi b├ío c├ío ph├▓ng ban
++    if (!q) {
++      if (selectedPhong) {
++        let url = `${API_BASE}/api/bao-cao/phong-ban?maPhongBan=${selectedPhong}&xiNghiep=${selectedXiNghiep}&tuNgay=${tuNgay}&denNgay=${denNgay}`;
++        axios.get(url, {
++          headers: { Authorization: `Bearer ${token}` }
++        }).then(res => {
++          setReportData(res.data);
++        }).catch(err => {
++          console.error("Lß╗ùi tß║úi lß║íi b├ío c├ío:", err);
++        });
++      }
++      return;
++    }
++
++    const delayDebounce = setTimeout(() => {
++      let url = `${API_BASE}/api/bao-cao/phong-ban?tuNgay=${tuNgay}&denNgay=${denNgay}&search=${encodeURIComponent(q)}`;
++      axios.get(url, {
++        headers: { Authorization: `Bearer ${token}` }
++      }).then(res => {
++        setReportData(res.data);
++      }).catch(err => {
++        console.error("Lß╗ùi t├¼m kiß║┐m tß╗▒ ─æß╗Öng:", err);
++      });
++    }, 400);
++
++    return () => clearTimeout(delayDebounce);
++  }, [searchQuery, tuNgay, denNgay, token]);
+ 
+   // H├ám ─É─âng Nhß║¡p
+   const handleLogin = async (e) => {
+@@ -195,8 +242,17 @@ export default function App() {
+ 
+   // Gß╗ìi API lß║Ñy b├ío c├ío c├┤ng
+   const fetchReport = () => {
+-    if (!selectedPhong) return alert("Vui l├▓ng chß╗ìn ph├▓ng ban!");
+-    axios.get(`${API_BASE}/api/bao-cao/phong-ban?maPhongBan=${selectedPhong}&xiNghiep=${selectedXiNghiep}&tuNgay=${tuNgay}&denNgay=${denNgay}`, {
++    const q = searchQuery.trim();
++    if (!q && !selectedPhong) return alert("Vui l├▓ng chß╗ìn ph├▓ng ban hoß║╖c nhß║¡p m├ú/t├¬n nh├ón vi├¬n ─æß╗â t├¼m kiß║┐m!");
++
++    let url = `${API_BASE}/api/bao-cao/phong-ban?tuNgay=${tuNgay}&denNgay=${denNgay}`;
++    if (q) {
++      url += `&search=${encodeURIComponent(q)}`;
++    } else {
++      url += `&maPhongBan=${selectedPhong}&xiNghiep=${selectedXiNghiep}`;
++    }
++
++    axios.get(url, {
+       headers: { Authorization: `Bearer ${token}` }
+     }).then(res => {
+       setReportData(res.data);
+@@ -206,6 +262,52 @@ export default function App() {
+     });
+   };
+ 
++  // Bß║»t ─æß║ºu chß╗ënh sß╗¡a d├▓ng
++  const startEdit = (row) => {
++    setEditingKey(`${row.MaChamCong}_${row.Ngay}`);
++    setEditGioVao(row.GioVao ? row.GioVao.substring(11, 19) : '');
++    setEditGioRa(row.GioRa ? row.GioRa.substring(11, 19) : '');
++  };
++
++  // L╞░u chß╗ënh sß╗¡a d├▓ng quß║╣t thß║╗
++  const handleSave = (row) => {
++    const timeRegex = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
++
++    if (editGioVao && !timeRegex.test(editGioVao)) {
++      return alert("Giß╗¥ v├áo kh├┤ng ─æ├║ng ─æß╗ïnh dß║íng 24h (HH:mm:ss hoß║╖c HH:mm)!");
++    }
++    if (editGioRa && !timeRegex.test(editGioRa)) {
++      return alert("Giß╗¥ ra kh├┤ng ─æ├║ng ─æß╗ïnh dß║íng 24h (HH:mm:ss hoß║╖c HH:mm)!");
++    }
++
++    const ngayYMD = typeof row.Ngay === 'string' ? row.Ngay.substring(0, 10) : new Date(row.Ngay).toISOString().substring(0, 10);
++    const formatTime = (timeStr) => {
++      if (!timeStr) return null;
++      const formatted = timeStr.length === 5 ? timeStr + ':00' : timeStr;
++      return `${ngayYMD}T${formatted}.000Z`;
++    };
++
++    const gioVaoFull = formatTime(editGioVao);
++    const gioRaFull = formatTime(editGioRa);
++
++    axios.post(`${API_BASE}/api/bao-cao/update-checkin`, {
++      maChamCong: row.MaChamCong,
++      ngay: ngayYMD,
++      gioVao: gioVaoFull,
++      gioRa: gioRaFull
++    }, {
++      headers: { Authorization: `Bearer ${token}` }
++    })
++    .then(res => {
++      alert(res.data.message || "Cß║¡p nhß║¡t th├ánh c├┤ng!");
++      setEditingKey('');
++      fetchReport();
++    })
++    .catch(err => {
++      alert("Lß╗ùi khi cß║¡p nhß║¡t: " + (err.response?.data?.message || err.message));
++    });
++  };
++
+   // Xuß║Ñt b├ío c├ío c├┤ng ra file Excel chuß║⌐n biß╗âu mß║½u
+   const handleExportExcel = () => {
+     if (!selectedPhong) return alert("Vui l├▓ng chß╗ìn ph├▓ng ban!");
+@@ -262,18 +364,24 @@ export default function App() {
+   useEffect(() => {
+     if (activeTab !== 'roles' || !token) return;
+ 
+-    axios.get(`${API_BASE}/api/admin/users`, { headers: { Authorization: `Bearer ${token}` } })
+-      .then(res => setUsers(res.data))
+-      .catch(err => console.error("Lß╗ùi lß║Ñy danh s├ích user:", err));
+-
+-    axios.get(`${API_BASE}/api/admin/roles`, { headers: { Authorization: `Bearer ${token}` } })
+-      .then(res => setRolesList(res.data))
+-      .catch(err => console.error("Lß╗ùi lß║Ñy danh s├ích roles:", err));
+-
+-    axios.get(`${API_BASE}/api/admin/employees`, { headers: { Authorization: `Bearer ${token}` } })
+-      .then(res => setEmployeesList(res.data))
+-      .catch(err => console.error("Lß╗ùi lß║Ñy danh s├ích nh├ón vi├¬n:", err));
+-  }, [activeTab, token]);
++    if (authSubTab === 'accounts') {
++      axios.get(`${API_BASE}/api/admin/users`, { headers: { Authorization: `Bearer ${token}` } })
++        .then(res => setUsers(res.data))
++        .catch(err => console.error("Lß╗ùi lß║Ñy danh s├ích user:", err));
++
++      axios.get(`${API_BASE}/api/admin/roles`, { headers: { Authorization: `Bearer ${token}` } })
++        .then(res => setRolesList(res.data))
++        .catch(err => console.error("Lß╗ùi lß║Ñy danh s├ích roles:", err));
++
++      axios.get(`${API_BASE}/api/admin/employees`, { headers: { Authorization: `Bearer ${token}` } })
++        .then(res => setEmployeesList(res.data))
++        .catch(err => console.error("Lß╗ùi lß║Ñy danh s├ích nh├ón vi├¬n:", err));
++    } else if (authSubTab === 'logs') {
++      axios.get(`${API_BASE}/api/admin/action-logs`, { headers: { Authorization: `Bearer ${token}` } })
++        .then(res => setActionLogs(res.data))
++        .catch(err => console.error("Lß╗ùi lß║Ñy nhß║¡t k├╜ thao t├íc:", err));
++    }
++  }, [activeTab, authSubTab, token]);
+ 
+   const handleSaveUserAuth = () => {
+     if (!editingUser) return;
+@@ -365,8 +473,17 @@ export default function App() {
+     );
+   }
+ 
+-  const totalPages = Math.ceil(reportData.length / pageSize);
+-  const currentItems = reportData.slice((currentPage - 1) * pageSize, currentPage * pageSize);
++  const filteredReportData = reportData.filter(row => {
++    const q = searchQuery.toLowerCase().trim();
++    if (!q) return true;
++    return (
++      String(row.MaChamCong).toLowerCase().includes(q) || 
++      row.TenNhanVien.toLowerCase().includes(q)
++    );
++  });
++
++  const totalPages = Math.ceil(filteredReportData.length / pageSize);
++  const currentItems = filteredReportData.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+ 
+   return (
+     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', width: '100%' }}>
+@@ -475,13 +592,23 @@ export default function App() {
+                   <input type="date" value={denNgay} onChange={e => setDenNgay(e.target.value)} className="filter-input" />
+                 </div>
+ 
++                <div className="filter-group">
++                  <label>T├¼m kiß║┐m nh├ón vi├¬n</label>
++                  <input 
++                    type="text" 
++                    placeholder="T├¼m theo M├ú CC / T├¬n..." 
++                    value={searchQuery} 
++                    onChange={e => setSearchQuery(e.target.value)} 
++                    className="filter-input"
++                  />
++                </div>
++
+                 <button onClick={fetchReport} className="btn-success">Xem b├ío c├ío</button>
+                 <button onClick={handleExportExcel} className="btn-excel">Xuß║Ñt Excel</button>
+                 <button onClick={handleExportExcelDetail} className="btn-excel" style={{ backgroundColor: '#0284c7' }} onMouseOver={e => e.currentTarget.style.backgroundColor = '#0369a1'} onMouseOut={e => e.currentTarget.style.backgroundColor = '#0284c7'}>Xuß║Ñt Chi Tiß║┐t</button>
+               </div>
+             </div>
+ 
+-            {/* Bß║óNG HIß╗éN THß╗è Dß╗« LIß╗åU B├üO C├üO Tß╗¿C THß╗£I */}
+             <div className="table-container">
+               <table className="report-table">
+                 <thead>
+@@ -499,11 +626,18 @@ export default function App() {
+                     <th>Trß║íng Th├íi</th>
+                     <th>Khu Vß╗▒c V├áo</th>
+                     <th>Khu Vß╗▒c Ra</th>
++                    {canEdit && <th>Thao t├íc</th>}
+                   </tr>
+                 </thead>
+                 <tbody>
+-                  {reportData.length === 0 ? (
+-                    <tr><td colSpan="13" className="empty-state">Kh├┤ng c├│ dß╗» liß╗çu hiß╗ân thß╗ï. H├úy chß╗ìn bß╗Ö lß╗ìc v├á bß║Ñm "Xem b├ío c├ío".</td></tr>
++                  {filteredReportData.length === 0 ? (
++                    <tr>
++                      <td colSpan={canEdit ? "14" : "13"} className="empty-state">
++                        {reportData.length === 0 
++                          ? "Kh├┤ng c├│ dß╗» liß╗çu hiß╗ân thß╗ï. H├úy chß╗ìn bß╗Ö lß╗ìc v├á bß║Ñm \"Xem b├ío c├ío\"." 
++                          : "Kh├┤ng t├¼m thß║Ñy nh├ón vi├¬n tr├╣ng khß╗¢p vß╗¢i tß╗½ kh├│a t├¼m kiß║┐m."}
++                      </td>
++                    </tr>
+                   ) : (
+                     currentItems.map((row, index) => {
+                       let badgeClass = 'badge badge-gray';
+@@ -519,6 +653,8 @@ export default function App() {
+                         }
+                       }
+ 
++                      const isEditing = editingKey === `${row.MaChamCong}_${row.Ngay}`;
++
+                       return (
+                         <tr key={index}>
+                           <td>{row.MaChamCong}</td>
+@@ -527,10 +663,30 @@ export default function App() {
+                           <td>{new Date(row.Ngay).toLocaleDateString('vi-VN')}</td>
+                           <td>{row.Thu}</td>
+                           <td className={row.GioVao ? "text-time-in" : "empty-cell"}>
+-                            {row.GioVao ? row.GioVao.substring(11, 19) : '--:--'}
++                            {isEditing ? (
++                              <input 
++                                type="text" 
++                                placeholder="HH:mm:ss"
++                                className="edit-input-time"
++                                value={editGioVao}
++                                onChange={e => setEditGioVao(e.target.value)}
++                              />
++                            ) : (
++                              row.GioVao ? row.GioVao.substring(11, 19) : '--:--'
++                            )}
+                           </td>
+                           <td className={row.GioRa ? "text-time-out" : "empty-cell"}>
+-                            {row.GioRa ? row.GioRa.substring(11, 19) : '--:--'}
++                            {isEditing ? (
++                              <input 
++                                type="text" 
++                                placeholder="HH:mm:ss"
++                                className="edit-input-time"
++                                value={editGioRa}
++                                onChange={e => setEditGioRa(e.target.value)}
++                              />
++                            ) : (
++                              row.GioRa ? row.GioRa.substring(11, 19) : '--:--'
++                            )}
+                           </td>
+                           <td className="text-cong">{row.Cong}</td>
+                           <td>{row.TongGio}</td>
+@@ -540,6 +696,18 @@ export default function App() {
+                           </td>
+                           <td className={row.KhuVucVao ? "" : "empty-cell"}>{row.KhuVucVao || '--'}</td>
+                           <td className={row.KhuVucRa ? "" : "empty-cell"}>{row.KhuVucRa || '--'}</td>
++                          {canEdit && (
++                            <td>
++                              {isEditing ? (
++                                <div style={{ display: 'flex', gap: '6px' }}>
++                                  <button onClick={() => handleSave(row)} className="btn-save-row">L╞░u</button>
++                                  <button onClick={() => setEditingKey('')} className="btn-cancel-row">Hß╗ºy</button>
++                                </div>
++                              ) : (
++                                <button onClick={() => startEdit(row)} className="btn-edit-row">Sß╗¡a</button>
++                              )}
++                            </td>
++                          )}
+                         </tr>
+                       );
+                     })
+@@ -548,10 +716,10 @@ export default function App() {
+               </table>
+             </div>
+ 
+-            {reportData.length > 0 && (
++            {filteredReportData.length > 0 && (
+               <div className="pagination-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', padding: '0 4px' }}>
+                 <span style={{ fontSize: '13px', color: '#6b7280' }}>
+-                  Hiß╗ân thß╗ï {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, reportData.length)} tr├¬n tß╗òng sß╗æ {reportData.length} kß║┐t quß║ú
++                  Hiß╗ân thß╗ï {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, filteredReportData.length)} tr├¬n tß╗òng sß╗æ {filteredReportData.length} kß║┐t quß║ú
+                 </span>
+                 <div style={{ display: 'flex', gap: '8px' }}>
+                   <button
+@@ -598,7 +766,47 @@ export default function App() {
+         ) : (
+           /* GIAO DIß╗åN QUß║óN L├¥ PH├éN QUYß╗ÇN */
+           <>
+-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
++            {/* Thanh Tab phß╗Ñ quß║ún l├╜ ph├ón quyß╗ün & logs */}
++            <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', borderBottom: '1px solid #e5e7eb', paddingBottom: '2px' }}>
++              <button 
++                onClick={() => setAuthSubTab('accounts')}
++                style={{
++                  cursor: 'pointer',
++                  padding: '8px 16px',
++                  fontWeight: authSubTab === 'accounts' ? '600' : '400',
++                  border: 'none',
++                  background: 'none',
++                  borderBottom: authSubTab === 'accounts' ? '3px solid #1b7e3e' : '3px solid transparent',
++                  color: authSubTab === 'accounts' ? '#1b7e3e' : '#4b5563',
++                  fontSize: '14px',
++                  transition: 'all 0.15s ease'
++                }}
++              >
++                T├ái khoß║ún & Ph├ón quyß╗ün
++              </button>
++              {userRoles.includes('Admin') && (
++                <button 
++                  onClick={() => setAuthSubTab('logs')}
++                  style={{
++                    cursor: 'pointer',
++                    padding: '8px 16px',
++                    fontWeight: authSubTab === 'logs' ? '600' : '400',
++                    border: 'none',
++                    background: 'none',
++                    borderBottom: authSubTab === 'logs' ? '3px solid #1b7e3e' : '3px solid transparent',
++                    color: authSubTab === 'logs' ? '#1b7e3e' : '#4b5563',
++                    fontSize: '14px',
++                    transition: 'all 0.15s ease'
++                  }}
++                >
++                  Nhß║¡t k├╜ thao t├íc
++                </button>
++              )}
++            </div>
++
++            {authSubTab === 'accounts' ? (
++              <>
++                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+               <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 500, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                 Danh s├ích t├ái khoß║ún hß╗ç thß╗æng
+               </h3>
+@@ -716,7 +924,54 @@ export default function App() {
+               </table>
+             </div>
+           </>
++        ) : userRoles.includes('Admin') ? (
++          <>
++            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
++              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 500, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
++                Nhß║¡t k├╜ thao t├íc hß╗ç thß╗æng
++              </h3>
++            </div>
++
++            <div className="table-container">
++              <table className="report-table">
++                <thead>
++                  <tr>
++                    <th style={{ width: '80px' }}>ID Log</th>
++                    <th style={{ width: '180px' }}>Thß╗¥i Gian</th>
++                    <th style={{ width: '150px' }}>T├ái Khoß║ún Thß╗▒c Hiß╗çn</th>
++                    <th style={{ width: '120px' }}>Loß║íi Thao T├íc</th>
++                    <th>Chi Tiß║┐t Thao T├íc</th>
++                  </tr>
++                </thead>
++                <tbody>
++                  {actionLogs.length === 0 ? (
++                    <tr><td colSpan="5" className="empty-state">Kh├┤ng c├│ lß╗ïch sß╗¡ thao t├íc n├áo ─æ╞░ß╗úc ghi nhß║¡n.</td></tr>
++                  ) : (
++                    actionLogs.map(log => (
++                      <tr key={log.LogID}>
++                        <td>{log.LogID}</td>
++                        <td>{new Date(log.CreatedAt).toLocaleString('vi-VN')}</td>
++                        <td><strong>{log.Username}</strong></td>
++                        <td>
++                          <span className="badge badge-gray" style={{ color: '#4b5563', border: '1px solid rgba(75, 85, 99, 0.3)' }}>
++                            {log.ActionType}
++                          </span>
++                        </td>
++                        <td style={{ whiteSpace: 'normal', wordBreak: 'break-word', fontSize: '13px' }}>
++                          {log.Details}
++                        </td>
++                      </tr>
++                    ))
++                  )}
++                </tbody>
++              </table>
++            </div>
++          </>
++        ) : (
++          <div className="empty-state">Bß║ín kh├┤ng c├│ quyß╗ün truy cß║¡p nhß║¡t k├╜ thao t├íc!</div>
+         )}
++      </>
++    )}
+ 
+         {/* POPUP MODAL CHß╗êNH Sß╗¼A PH├éN QUYß╗ÇN */}
+         {editingUser && (

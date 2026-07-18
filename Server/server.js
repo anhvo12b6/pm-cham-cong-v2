@@ -636,6 +636,41 @@ app.get("/api/bao-cao/phong-ban", authenticate, async (req, res) => {
       return { isLate: false, minutes: 0 };
     };
 
+    // 5.1 Trừ nghỉ trưa 11:00-13:00 (UTC) khỏi thời gian làm việc
+    const LUNCH_START_MIN = 11 * 60; // 660
+    const LUNCH_END_MIN = 13 * 60; // 780
+
+    const getMinutesFromDateUTC = (d) =>
+      d.getUTCHours() * 60 + d.getUTCMinutes();
+
+    const getLunchCutMinutes = (gioVaoDate, gioRaDate) => {
+      // assume gioVaoDate/gioRaDate nằm cùng ngày UTC (theo cách code hiện tại)
+      const inMin = getMinutesFromDateUTC(gioVaoDate);
+      const outMin = getMinutesFromDateUTC(gioRaDate);
+
+      const start = Math.min(inMin, outMin);
+      const end = Math.max(inMin, outMin);
+
+      const overlapStart = Math.max(start, LUNCH_START_MIN);
+      const overlapEnd = Math.min(end, LUNCH_END_MIN);
+
+      const overlap = overlapEnd - overlapStart;
+      return overlap > 0 ? overlap : 0;
+    };
+
+    const calcWorkedHoursWithLunchCut = (gioVaoDate, gioRaDate) => {
+      const diffMs = gioRaDate.getTime() - gioVaoDate.getTime();
+      let diffHours = diffMs / (1000 * 60 * 60);
+
+      const lunchMinutes = getLunchCutMinutes(gioVaoDate, gioRaDate);
+      diffHours = diffHours - lunchMinutes / 60;
+
+      // không để âm
+      if (diffHours < 0) diffHours = 0;
+
+      return diffHours;
+    };
+
     const daysOfWeek = ["CN", "Hai", "Ba", "Tư", "Năm", "Sáu", "Bảy"];
 
     // 6. Xây dựng báo cáo tổng hợp
@@ -670,8 +705,7 @@ app.get("/api/bao-cao/phong-ban", authenticate, async (req, res) => {
           GioVao = punches[0].GioCham;
           GioRa = punches[punches.length - 1].GioCham;
 
-          const diffMs = GioRa.getTime() - GioVao.getTime();
-          const diffHours = diffMs / (1000 * 60 * 60);
+          const diffHours = calcWorkedHoursWithLunchCut(GioVao, GioRa);
           TongGio = diffHours.toFixed(2).replace(".", ",");
 
           if (diffHours >= 7.5) {
@@ -775,8 +809,11 @@ app.post(
         } else {
           // Lấy thông tin máy quẹt gần nhất của nhân viên này để gán
           const lastScanRequest = new sql.Request(transaction);
-          const lastScanResult = await lastScanRequest
-            .input("MaChamCong", sql.Int, maChamCong).query(`
+          const lastScanResult = await lastScanRequest.input(
+            "MaChamCong",
+            sql.Int,
+            maChamCong,
+          ).query(`
                         SELECT TOP 1 MaSoMay, TenMay 
                         FROM [dbo].[CheckInOut]
                         WHERE MaChamCong = @MaChamCong
@@ -841,11 +878,7 @@ app.post(
           } else if (existing.length === 1) {
             await updateCheckIn(firstId, gioVao);
             // Sao chép thông tin máy quẹt từ bản ghi duy nhất hiện tại để đảm bảo tính nhất quán
-            await insertCheckIn(
-              gioRa,
-              existing[0].MaSoMay,
-              existing[0].TenMay,
-            );
+            await insertCheckIn(gioRa, existing[0].MaSoMay, existing[0].TenMay);
           } else {
             await updateCheckIn(firstId, gioVao);
             await updateCheckIn(lastId, gioRa);
@@ -908,7 +941,10 @@ app.post(
             `📝 [LOG] User '${userObj.username}' đã cập nhật giờ CC của nhân viên ${maChamCong} ngày ${ngay}`,
           );
         } catch (logErr) {
-          console.error("❌ Lỗi ghi log thao tác vào Database:", logErr.message);
+          console.error(
+            "❌ Lỗi ghi log thao tác vào Database:",
+            logErr.message,
+          );
         }
 
         res.json({ message: "Cập nhật giờ chấm công thành công!" });
@@ -1310,8 +1346,7 @@ app.get("/api/bao-cao/export-excel", authenticate, async (req, res) => {
         } else if (punches.length >= 2) {
           const GioVao = punches[0].GioCham;
           const GioRa = punches[punches.length - 1].GioCham;
-          const diffHours =
-            (GioRa.getTime() - GioVao.getTime()) / (1000 * 60 * 60);
+          const diffHours = calcWorkedHoursWithLunchCut(GioVao, GioRa);
 
           if (diffHours >= 7.5) {
             Cong = 1;
@@ -1888,8 +1923,8 @@ app.get("/api/bao-cao/export-excel-detail", authenticate, async (req, res) => {
             somMin = standardOutMinutes - totalOutMinutes;
           }
 
-          const diffHours =
-            (GioRa.getTime() - GioVao.getTime()) / (1000 * 60 * 60);
+          const diffHours = calcWorkedHoursWithLunchCut(GioVao, GioRa);
+
           if (diffHours >= 7.5) {
             congVal = 1;
             tongGioVal = 8;
