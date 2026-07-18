@@ -358,14 +358,15 @@ body {
 
 /* Inline Editing Styles */
 .edit-input-time {
-  padding: 4px 8px;
+  padding: 4px 6px;
   border: 1px solid var(--border-color);
   border-radius: 4px;
   font-size: 13px;
   outline: none;
   background-color: white;
-  width: 95px;
+  width: 110px;
   box-sizing: border-box;
+  cursor: pointer;
 }
 
 .edit-input-time:focus {

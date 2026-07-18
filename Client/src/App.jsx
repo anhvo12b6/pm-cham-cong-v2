@@ -271,33 +271,23 @@ export default function App() {
   // Bắt đầu chỉnh sửa dòng
   const startEdit = (row) => {
     setEditingKey(`${row.MaChamCong}_${row.Ngay}`);
-    setEditGioVao(row.GioVao ? row.GioVao.substring(11, 19) : "");
-    setEditGioRa(row.GioRa ? row.GioRa.substring(11, 19) : "");
+    // input type="time" nhận định dạng "HH:mm" — lấy substring(11,16)
+    setEditGioVao(row.GioVao ? row.GioVao.substring(11, 16) : "");
+    setEditGioRa(row.GioRa ? row.GioRa.substring(11, 16) : "");
   };
 
   // Lưu chỉnh sửa dòng quẹt thẻ
   const handleSave = (row) => {
-    const timeRegex = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
-
-    if (editGioVao && !timeRegex.test(editGioVao)) {
-      return alert(
-        "Giờ vào không đúng định dạng 24h (HH:mm:ss hoặc HH:mm)!",
-      );
-    }
-    if (editGioRa && !timeRegex.test(editGioRa)) {
-      return alert(
-        "Giờ ra không đúng định dạng 24h (HH:mm:ss hoặc HH:mm)!",
-      );
-    }
-
     const ngayYMD =
       typeof row.Ngay === "string"
         ? row.Ngay.substring(0, 10)
         : new Date(row.Ngay).toISOString().substring(0, 10);
+
+    // input type="time" trả về "HH:mm", thêm ":00" để thành "HH:mm:ss"
     const formatTime = (timeStr) => {
       if (!timeStr) return null;
-      const formatted = timeStr.length === 5 ? timeStr + ":00" : timeStr;
-      return `${ngayYMD}T${formatted}.000Z`;
+      const t = timeStr.length === 5 ? timeStr + ":00" : timeStr;
+      return `${ngayYMD}T${t}.000Z`;
     };
 
     const gioVaoFull = formatTime(editGioVao);
@@ -849,15 +839,14 @@ export default function App() {
                           >
                             {isEditing ? (
                               <input
-                                type="text"
-                                placeholder="HH:mm:ss"
+                                type="time"
                                 className="edit-input-time"
                                 value={editGioVao}
                                 onChange={(e) => setEditGioVao(e.target.value)}
                               />
                             ) : (
                               row.GioVao
-                                ? row.GioVao.substring(11, 19)
+                                ? row.GioVao.substring(11, 16)
                                 : "--:--"
                             )}
                           </td>
@@ -868,14 +857,13 @@ export default function App() {
                           >
                             {isEditing ? (
                               <input
-                                type="text"
-                                placeholder="HH:mm:ss"
+                                type="time"
                                 className="edit-input-time"
                                 value={editGioRa}
                                 onChange={(e) => setEditGioRa(e.target.value)}
                               />
                             ) : (
-                              row.GioRa ? row.GioRa.substring(11, 19) : "--:--"
+                              row.GioRa ? row.GioRa.substring(11, 16) : "--:--"
                             )}
                           </td>
                           <td className="text-cong">{row.Cong}</td>
