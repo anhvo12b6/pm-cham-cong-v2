@@ -62,10 +62,6 @@ export default function App() {
 
   // Filter nâng cao báo cáo
   const [filterTrangThai, setFilterTrangThai] = useState("all");
-  const [filterGioVaoTu, setFilterGioVaoTu] = useState("");
-  const [filterGioVaoDen, setFilterGioVaoDen] = useState("");
-  const [filterGioRaTu, setFilterGioRaTu] = useState("");
-  const [filterGioRaDen, setFilterGioRaDen] = useState("");
 
   // States cho phân quyền (Admin)
   const [activeTab, setActiveTab] = useState("report"); // 'report' hoặc 'roles'
@@ -258,27 +254,7 @@ export default function App() {
 
   // Filter client-side trên dữ liệu đã load
   const filteredReportData = useMemo(() => {
-    const parseTimeToMinutes = (timeStr) => {
-      if (!timeStr) return null;
-      const [h, m] = timeStr.split(":").map(Number);
-      if (Number.isNaN(h) || Number.isNaN(m)) return null;
-      return h * 60 + m;
-    };
-
-    const getMinutesFromDateTimeString = (dateTimeStr) => {
-      if (!dateTimeStr) return null;
-      const d = new Date(dateTimeStr);
-      if (Number.isNaN(d.getTime())) return null;
-      return d.getHours() * 60 + d.getMinutes();
-    };
-
-    const gioVaoTuMin = parseTimeToMinutes(filterGioVaoTu);
-    const gioVaoDenMin = parseTimeToMinutes(filterGioVaoDen);
-    const gioRaTuMin = parseTimeToMinutes(filterGioRaTu);
-    const gioRaDenMin = parseTimeToMinutes(filterGioRaDen);
-
     return reportData.filter((row) => {
-      // 1) Filter trạng thái
       let matchTrangThai = true;
       if (filterTrangThai === "dung_gio") {
         matchTrangThai =
@@ -294,36 +270,9 @@ export default function App() {
           typeof row.TrangThai === "string" &&
           row.TrangThai.includes("Thiếu ra");
       }
-      if (!matchTrangThai) return false;
-
-      // 2) Filter giờ vào
-      const gioVaoMin = getMinutesFromDateTimeString(row.GioVao);
-      if (gioVaoTuMin !== null) {
-        if (gioVaoMin === null || gioVaoMin < gioVaoTuMin) return false;
-      }
-      if (gioVaoDenMin !== null) {
-        if (gioVaoMin === null || gioVaoMin > gioVaoDenMin) return false;
-      }
-
-      // 3) Filter giờ ra
-      const gioRaMin = getMinutesFromDateTimeString(row.GioRa);
-      if (gioRaTuMin !== null) {
-        if (gioRaMin === null || gioRaMin < gioRaTuMin) return false;
-      }
-      if (gioRaDenMin !== null) {
-        if (gioRaMin === null || gioRaMin > gioRaDenMin) return false;
-      }
-
-      return true;
+      return matchTrangThai;
     });
-  }, [
-    reportData,
-    filterTrangThai,
-    filterGioVaoTu,
-    filterGioVaoDen,
-    filterGioRaTu,
-    filterGioRaDen,
-  ]);
+  }, [reportData, filterTrangThai]);
 
   // Xuất báo cáo công ra file Excel chuẩn biểu mẫu
   const handleExportExcel = () => {
@@ -714,46 +663,6 @@ export default function App() {
                     <option value="vang">Vắng</option>
                     <option value="thieu_ra">Thiếu ra</option>
                   </select>
-                </div>
-
-                <div className="filter-group">
-                  <label>Giờ vào từ</label>
-                  <input
-                    type="time"
-                    value={filterGioVaoTu}
-                    onChange={(e) => setFilterGioVaoTu(e.target.value)}
-                    className="filter-input"
-                  />
-                </div>
-
-                <div className="filter-group">
-                  <label>Giờ vào đến</label>
-                  <input
-                    type="time"
-                    value={filterGioVaoDen}
-                    onChange={(e) => setFilterGioVaoDen(e.target.value)}
-                    className="filter-input"
-                  />
-                </div>
-
-                <div className="filter-group">
-                  <label>Giờ ra từ</label>
-                  <input
-                    type="time"
-                    value={filterGioRaTu}
-                    onChange={(e) => setFilterGioRaTu(e.target.value)}
-                    className="filter-input"
-                  />
-                </div>
-
-                <div className="filter-group">
-                  <label>Giờ ra đến</label>
-                  <input
-                    type="time"
-                    value={filterGioRaDen}
-                    onChange={(e) => setFilterGioRaDen(e.target.value)}
-                    className="filter-input"
-                  />
                 </div>
 
                 <button onClick={fetchReport} className="btn-success">
