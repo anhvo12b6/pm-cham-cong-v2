@@ -364,17 +364,7 @@ app.get("/api/phong-ban", authenticate, async (req, res) => {
 
 // [API 3]: Tải dữ liệu báo cáo chấm công (Tính toán động trực tiếp từ CheckInOut)
 app.get("/api/bao-cao/phong-ban", authenticate, async (req, res) => {
-  let {
-    maPhongBan,
-    xiNghiep,
-    tuNgay,
-    denNgay,
-    trangThai,
-    gioVaoTu,
-    gioVaoDen,
-    gioRaTu,
-    gioRaDen,
-  } = req.query;
+  let { maPhongBan, xiNghiep, tuNgay, denNgay } = req.query;
 
   if (!tuNgay || !denNgay) {
     return res.status(400).json({ message: "Thiếu tham số ngày tháng!" });
@@ -413,21 +403,17 @@ app.get("/api/bao-cao/phong-ban", authenticate, async (req, res) => {
       }
 
       if (allowedKhuVuc.length === 0 && allowedPhongBan.length === 0) {
-        return res
-          .status(403)
-          .json({
-            message:
-              "Tài khoản của bạn chưa được phân quyền xem bất kỳ bộ phận nào!",
-          });
+        return res.status(403).json({
+          message:
+            "Tài khoản của bạn chưa được phân quyền xem bất kỳ bộ phận nào!",
+        });
       }
 
       if (maPhongBan === "ALL") {
         if (!xiNghiep) {
-          return res
-            .status(400)
-            .json({
-              message: "Thiếu tên Khu vực/Xí nghiệp khi chọn tất cả phòng ban!",
-            });
+          return res.status(400).json({
+            message: "Thiếu tên Khu vực/Xí nghiệp khi chọn tất cả phòng ban!",
+          });
         }
         const kvResult = await pool
           .request()
@@ -441,11 +427,9 @@ app.get("/api/bao-cao/phong-ban", authenticate, async (req, res) => {
           !kvRow ||
           !allowedKhuVuc.map((k) => k.trim()).includes(kvRow.MaKhuVuc.trim())
         ) {
-          return res
-            .status(403)
-            .json({
-              message: `Bạn không có quyền xem dữ liệu của đơn vị: ${xiNghiep}!`,
-            });
+          return res.status(403).json({
+            message: `Bạn không có quyền xem dữ liệu của đơn vị: ${xiNghiep}!`,
+          });
         }
       } else {
         const pbCheck = await pool
@@ -465,11 +449,9 @@ app.get("/api/bao-cao/phong-ban", authenticate, async (req, res) => {
           !cleanAllowedPhongBan.includes(maPhongBan.trim()) &&
           !cleanAllowedKhuVuc.includes(maKhuVuc)
         ) {
-          return res
-            .status(403)
-            .json({
-              message: "Bạn không có quyền truy cập dữ liệu của phòng ban này!",
-            });
+          return res.status(403).json({
+            message: "Bạn không có quyền truy cập dữ liệu của phòng ban này!",
+          });
         }
       }
     }
@@ -483,11 +465,9 @@ app.get("/api/bao-cao/phong-ban", authenticate, async (req, res) => {
     let maPhongBanList = [];
     if (maPhongBan === "ALL") {
       if (!xiNghiep) {
-        return res
-          .status(400)
-          .json({
-            message: "Thiếu tên Khu vực/Xí nghiệp khi chọn tất cả phòng ban!",
-          });
+        return res.status(400).json({
+          message: "Thiếu tên Khu vực/Xí nghiệp khi chọn tất cả phòng ban!",
+        });
       }
 
       // Lấy tất cả phòng ban trực thuộc TenKhuVuc được chọn
@@ -667,77 +647,15 @@ app.get("/api/bao-cao/phong-ban", authenticate, async (req, res) => {
       }
     }
 
-    // Áp dụng bộ lọc nâng cao theo trạng thái và khung giờ vào/ra
-    const parseTimeToMinutes = (timeStr) => {
-      if (!timeStr || typeof timeStr !== "string") return null;
-      const [hStr, mStr] = timeStr.split(":");
-      const h = Number(hStr);
-      const m = Number(mStr);
-      if (Number.isNaN(h) || Number.isNaN(m)) return null;
-      return h * 60 + m;
-    };
-
-    const getMinutesFromDateUtc = (dateObj) => {
-      if (!dateObj) return null;
-      return dateObj.getUTCHours() * 60 + dateObj.getUTCMinutes();
-    };
-
-    const normalizedTrangThai = (trangThai || "all").toLowerCase();
-    const gioVaoTuMin = parseTimeToMinutes(gioVaoTu);
-    const gioVaoDenMin = parseTimeToMinutes(gioVaoDen);
-    const gioRaTuMin = parseTimeToMinutes(gioRaTu);
-    const gioRaDenMin = parseTimeToMinutes(gioRaDen);
-
-    let filteredReport = report.filter((row) => {
-      // 1) Filter trạng thái
-      let matchTrangThai = true;
-      if (normalizedTrangThai === "dung_gio") {
-        matchTrangThai =
-          typeof row.TrangThai === "string" &&
-          row.TrangThai.startsWith("Đúng giờ");
-      } else if (normalizedTrangThai === "di_tre") {
-        matchTrangThai =
-          typeof row.TrangThai === "string" && row.TrangThai.includes("Trễ");
-      } else if (normalizedTrangThai === "vang") {
-        matchTrangThai = row.TrangThai === "Vắng";
-      } else if (normalizedTrangThai === "thieu_ra") {
-        matchTrangThai =
-          typeof row.TrangThai === "string" &&
-          row.TrangThai.includes("Thiếu ra");
-      }
-
-      if (!matchTrangThai) return false;
-
-      // 2) Filter giờ vào
-      const gioVaoMin = getMinutesFromDateUtc(row.GioVao);
-      if (gioVaoTuMin !== null) {
-        if (gioVaoMin === null || gioVaoMin < gioVaoTuMin) return false;
-      }
-      if (gioVaoDenMin !== null) {
-        if (gioVaoMin === null || gioVaoMin > gioVaoDenMin) return false;
-      }
-
-      // 3) Filter giờ ra
-      const gioRaMin = getMinutesFromDateUtc(row.GioRa);
-      if (gioRaTuMin !== null) {
-        if (gioRaMin === null || gioRaMin < gioRaTuMin) return false;
-      }
-      if (gioRaDenMin !== null) {
-        if (gioRaMin === null || gioRaMin > gioRaDenMin) return false;
-      }
-
-      return true;
-    });
-
     // Sắp xếp báo cáo theo Ngày tăng dần rồi đến Mã chấm công tăng dần
-    filteredReport.sort((a, b) => {
+    report.sort((a, b) => {
       if (a.Ngay.getTime() !== b.Ngay.getTime()) {
         return a.Ngay.getTime() - b.Ngay.getTime();
       }
       return a.MaChamCong - b.MaChamCong;
     });
 
-    res.json(filteredReport);
+    res.json(report);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -784,21 +702,17 @@ app.get("/api/bao-cao/export-excel", authenticate, async (req, res) => {
       }
 
       if (allowedKhuVuc.length === 0 && allowedPhongBan.length === 0) {
-        return res
-          .status(403)
-          .json({
-            message:
-              "Tài khoản của bạn chưa được phân quyền xem bất kỳ bộ phận nào!",
-          });
+        return res.status(403).json({
+          message:
+            "Tài khoản của bạn chưa được phân quyền xem bất kỳ bộ phận nào!",
+        });
       }
 
       if (maPhongBan === "ALL") {
         if (!xiNghiep) {
-          return res
-            .status(400)
-            .json({
-              message: "Thiếu tên Khu vực/Xí nghiệp khi chọn tất cả phòng ban!",
-            });
+          return res.status(400).json({
+            message: "Thiếu tên Khu vực/Xí nghiệp khi chọn tất cả phòng ban!",
+          });
         }
         const kvResult = await pool
           .request()
@@ -812,11 +726,9 @@ app.get("/api/bao-cao/export-excel", authenticate, async (req, res) => {
           !kvRow ||
           !allowedKhuVuc.map((k) => k.trim()).includes(kvRow.MaKhuVuc.trim())
         ) {
-          return res
-            .status(403)
-            .json({
-              message: `Bạn không có quyền xem dữ liệu của đơn vị: ${xiNghiep}!`,
-            });
+          return res.status(403).json({
+            message: `Bạn không có quyền xem dữ liệu của đơn vị: ${xiNghiep}!`,
+          });
         }
       } else {
         const pbCheck = await pool
@@ -836,11 +748,9 @@ app.get("/api/bao-cao/export-excel", authenticate, async (req, res) => {
           !cleanAllowedPhongBan.includes(maPhongBan.trim()) &&
           !cleanAllowedKhuVuc.includes(maKhuVuc)
         ) {
-          return res
-            .status(403)
-            .json({
-              message: "Bạn không có quyền truy cập dữ liệu của phòng ban này!",
-            });
+          return res.status(403).json({
+            message: "Bạn không có quyền truy cập dữ liệu của phòng ban này!",
+          });
         }
       }
     }
@@ -855,11 +765,9 @@ app.get("/api/bao-cao/export-excel", authenticate, async (req, res) => {
     let tenPhongBan = "";
     if (maPhongBan === "ALL") {
       if (!xiNghiep) {
-        return res
-          .status(400)
-          .json({
-            message: "Thiếu tên Khu vực/Xí nghiệp khi chọn tất cả phòng ban!",
-          });
+        return res.status(400).json({
+          message: "Thiếu tên Khu vực/Xí nghiệp khi chọn tất cả phòng ban!",
+        });
       }
       tenPhongBan = `Toàn bộ ${xiNghiep}`;
 
@@ -1399,21 +1307,17 @@ app.get("/api/bao-cao/export-excel-detail", authenticate, async (req, res) => {
       }
 
       if (allowedKhuVuc.length === 0 && allowedPhongBan.length === 0) {
-        return res
-          .status(403)
-          .json({
-            message:
-              "Tài khoản của bạn chưa được phân quyền xem bất kỳ bộ phận nào!",
-          });
+        return res.status(403).json({
+          message:
+            "Tài khoản của bạn chưa được phân quyền xem bất kỳ bộ phận nào!",
+        });
       }
 
       if (maPhongBan === "ALL") {
         if (!xiNghiep) {
-          return res
-            .status(400)
-            .json({
-              message: "Thiếu tên Khu vực/Xí nghiệp khi chọn tất cả phòng ban!",
-            });
+          return res.status(400).json({
+            message: "Thiếu tên Khu vực/Xí nghiệp khi chọn tất cả phòng ban!",
+          });
         }
         const kvResult = await pool
           .request()
@@ -1427,11 +1331,9 @@ app.get("/api/bao-cao/export-excel-detail", authenticate, async (req, res) => {
           !kvRow ||
           !allowedKhuVuc.map((k) => k.trim()).includes(kvRow.MaKhuVuc.trim())
         ) {
-          return res
-            .status(403)
-            .json({
-              message: `Bạn không có quyền xem dữ liệu của đơn vị: ${xiNghiep}!`,
-            });
+          return res.status(403).json({
+            message: `Bạn không có quyền xem dữ liệu của đơn vị: ${xiNghiep}!`,
+          });
         }
       } else {
         const pbCheck = await pool
@@ -1451,11 +1353,9 @@ app.get("/api/bao-cao/export-excel-detail", authenticate, async (req, res) => {
           !cleanAllowedPhongBan.includes(maPhongBan.trim()) &&
           !cleanAllowedKhuVuc.includes(maKhuVuc)
         ) {
-          return res
-            .status(403)
-            .json({
-              message: "Bạn không có quyền truy cập dữ liệu của phòng ban này!",
-            });
+          return res.status(403).json({
+            message: "Bạn không có quyền truy cập dữ liệu của phòng ban này!",
+          });
         }
       }
     }
@@ -1470,11 +1370,9 @@ app.get("/api/bao-cao/export-excel-detail", authenticate, async (req, res) => {
     let tenPhongBan = "";
     if (maPhongBan === "ALL") {
       if (!xiNghiep) {
-        return res
-          .status(400)
-          .json({
-            message: "Thiếu tên Khu vực/Xí nghiệp khi chọn tất cả phòng ban!",
-          });
+        return res.status(400).json({
+          message: "Thiếu tên Khu vực/Xí nghiệp khi chọn tất cả phòng ban!",
+        });
       }
       tenPhongBan = `Toàn bộ ${xiNghiep}`;
 
