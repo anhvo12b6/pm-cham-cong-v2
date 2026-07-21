@@ -15,3 +15,7 @@
 - [x] 3. Cập nhật tiến độ TODO sau mỗi bước hoàn thành
 
 - [ ] 4. Kiểm tra nhanh build/chạy để xác nhận không lỗi cú pháp
+
+# mật khẩu admin
+- tk: admin
+- mk: 123456

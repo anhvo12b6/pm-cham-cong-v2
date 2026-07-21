@@ -48,9 +48,124 @@ const mitacoPool = new sql.ConnectionPool(mitacoConfig);
 
 authPool
   .connect()
-  .then(() =>
-    console.log("✅ Đã kết nối thành công Database WebApp_Auth (Phân quyền)"),
-  )
+  .then(async () => {
+    console.log("✅ Đã kết nối thành công Database WebApp_Auth (Phân quyền)");
+    try {
+      const pool = await authPool;
+
+      // 0. Tạo bảng nếu chưa tồn tại trong WebApp_Auth
+      await pool.request().query(`
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Web_Users')
+        BEGIN
+          CREATE TABLE Web_Users (
+            UserID INT IDENTITY(1,1) PRIMARY KEY,
+            Username NVARCHAR(50) NOT NULL UNIQUE,
+            PasswordHash NVARCHAR(255) NOT NULL,
+            FullName NVARCHAR(100),
+            MaChamCong INT,
+            IsActive BIT DEFAULT 1,
+            AllowedKhuVuc NVARCHAR(MAX),
+            AllowedPhongBan NVARCHAR(MAX)
+          );
+        END
+
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Web_Roles')
+        BEGIN
+          CREATE TABLE Web_Roles (
+            RoleID INT IDENTITY(1,1) PRIMARY KEY,
+            RoleName NVARCHAR(50) NOT NULL UNIQUE,
+            Description NVARCHAR(255)
+          );
+        END
+
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Web_UserRoles')
+        BEGIN
+          CREATE TABLE Web_UserRoles (
+            UserID INT NOT NULL,
+            RoleID INT NOT NULL,
+            PRIMARY KEY (UserID, RoleID)
+          );
+        END
+      `);
+
+      let userRes = await pool
+        .request()
+        .input("Username", sql.NVarChar(50), "admin")
+        .query("SELECT UserID FROM Web_Users WHERE Username = @Username");
+
+      const hash = await bcrypt.hash("123456", 10);
+      let userId;
+      if (userRes.recordset.length === 0) {
+        const insertUser = await pool
+          .request()
+          .input("Username", sql.NVarChar(50), "admin")
+          .input("PasswordHash", sql.NVarChar(255), hash)
+          .input("FullName", sql.NVarChar(100), "Quản trị viên")
+          .input("IsActive", sql.Bit, 1).query(`
+            INSERT INTO Web_Users (Username, PasswordHash, FullName, IsActive)
+            OUTPUT INSERTED.UserID
+            VALUES (@Username, @PasswordHash, @FullName, @IsActive)
+          `);
+        userId = insertUser.recordset[0].UserID;
+        console.log("🔑 Đã tạo tài khoản 'admin' mới thành công!");
+      } else {
+        userId = userRes.recordset[0].UserID;
+        await pool
+          .request()
+          .input("UserID", sql.Int, userId)
+          .input("PasswordHash", sql.NVarChar(255), hash)
+          .input("IsActive", sql.Bit, 1).query(`
+            UPDATE Web_Users
+            SET PasswordHash = @PasswordHash, IsActive = @IsActive
+            WHERE UserID = @UserID
+          `);
+        console.log("🔑 Đã reset mật khẩu tài khoản 'admin' về 123456 & kích hoạt thành công!");
+      }
+
+      let roleRes = await pool
+        .request()
+        .input("RoleName", sql.NVarChar(50), "Admin")
+        .query("SELECT RoleID FROM Web_Roles WHERE RoleName = @RoleName");
+
+      let roleId;
+      if (roleRes.recordset.length === 0) {
+        const insertRole = await pool
+          .request()
+          .input("RoleName", sql.NVarChar(50), "Admin")
+          .input("Description", sql.NVarChar(255), "Quyền Quản trị hệ thống").query(`
+            INSERT INTO Web_Roles (RoleName, Description)
+            OUTPUT INSERTED.RoleID
+            VALUES (@RoleName, @Description)
+          `);
+        roleId = insertRole.recordset[0].RoleID;
+      } else {
+        roleId = roleRes.recordset[0].RoleID;
+      }
+
+      let userRoleRes = await pool
+        .request()
+        .input("UserID", sql.Int, userId)
+        .input("RoleID", sql.Int, roleId)
+        .query(
+          "SELECT * FROM Web_UserRoles WHERE UserID = @UserID AND RoleID = @RoleID",
+        );
+
+      if (userRoleRes.recordset.length === 0) {
+        await pool
+          .request()
+          .input("UserID", sql.Int, userId)
+          .input("RoleID", sql.Int, roleId)
+          .query(
+            "INSERT INTO Web_UserRoles (UserID, RoleID) VALUES (@UserID, @RoleID)",
+          );
+        console.log("👑 Đã tự động gán quyền 'Admin' cho tài khoản admin!");
+      } else {
+        console.log("👑 Tài khoản 'admin' đã sẵn sàng với quyền Admin!");
+      }
+    } catch (e) {
+      console.error("⚠️ Lỗi khởi tạo tài khoản admin tự động:", e.message);
+    }
+  })
   .catch((err) =>
     console.error("❌ LỖI KẾT NỐI DATABASE WebApp_Auth:", err.message),
   );
@@ -90,7 +205,7 @@ const authenticate = (req, res, next) => {
     // Thử giải mã bằng JWT_SECRET trước (của App), nếu không được thì thử giải mã bằng JWT_KEY (của SSO/IT Workspace)
     let decoded;
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
+      decoded = jwt.verify(token, process.env.JWT_SECRET || "CHAM_CONG_SECRET_KEY_2026");
     } catch (err) {
       decoded = jwt.verify(token, process.env.JWT_KEY || "CHẤM CÔNG APP V2");
     }
@@ -128,6 +243,7 @@ const checkRole = (allowedRoles) => {
 // [API 1]: Đăng nhập hệ thống (Xác thực từ DB WebApp_Auth)
 app.post("/api/auth/login", async (req, res) => {
   const { username, password } = req.body;
+  console.log("👉 Đăng nhập với Username:", username);
 
   try {
     const pool = await authPool;
@@ -141,7 +257,36 @@ app.post("/api/auth/login", async (req, res) => {
 
     const user = result.recordset[0];
 
-    if (!user || !(await bcrypt.compare(password, user.PasswordHash))) {
+    if (!user) {
+      console.log("❌ Không tìm thấy user hoặc IsActive = 0 đối với username:", username);
+      return res
+        .status(400)
+        .json({ message: "Tài khoản hoặc mật khẩu không khớp!" });
+    }
+
+    let isMatch = false;
+    try {
+      // 1. Check bcrypt
+      isMatch = await bcrypt.compare(password, user.PasswordHash);
+    } catch (e) {
+      isMatch = false;
+    }
+
+    // 2. Check plain text
+    if (!isMatch && password === user.PasswordHash) {
+      isMatch = true;
+    }
+
+    // 3. Check MD5
+    if (!isMatch) {
+      const crypto = require("crypto");
+      const md5Hash = crypto.createHash("md5").update(password).digest("hex");
+      if (md5Hash.toLowerCase() === (user.PasswordHash || "").toLowerCase()) {
+        isMatch = true;
+      }
+    }
+
+    if (!isMatch) {
       return res
         .status(400)
         .json({ message: "Tài khoản hoặc mật khẩu không khớp!" });
@@ -160,6 +305,7 @@ app.post("/api/auth/login", async (req, res) => {
     const roles = rolesResult.recordset.map((row) => row.RoleName);
 
     // Khởi tạo Token mã hóa JWT
+    const jwtSecret = process.env.JWT_SECRET || "CHAM_CONG_SECRET_KEY_2026";
     const token = jwt.sign(
       {
         userId: user.UserID,
@@ -169,9 +315,11 @@ app.post("/api/auth/login", async (req, res) => {
         allowedKhuVuc: user.AllowedKhuVuc,
         allowedPhongBan: user.AllowedPhongBan,
       },
-      process.env.JWT_SECRET,
+      jwtSecret,
       { expiresIn: "8h" },
     );
+
+    console.log("✅ Đăng nhập thành công cho user:", user.Username, "với roles:", roles);
 
     res.json({
       token,
@@ -181,7 +329,8 @@ app.post("/api/auth/login", async (req, res) => {
       allowedPhongBan: user.AllowedPhongBan,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("❌ Lỗi xử lý đăng nhập:", err.message);
+    res.status(500).json({ message: err.message, error: err.message });
   }
 });
 
@@ -434,25 +583,24 @@ app.get("/api/bao-cao/phong-ban", authenticate, async (req, res) => {
           });
         }
       } else if (maPhongBan) {
-        const pbCheck = await pool
+        const pbResult = await pool
           .request()
-          .input("MaPhongBan", sql.VarChar(50), maPhongBan)
+          .input("MaPhongBan", sql.VarChar(50), maPhongBan.trim())
           .query(
-            `SELECT MaKhuVuc FROM [dbo].[PHONGBAN] WHERE MaPhongBan = @MaPhongBan`,
+            `SELECT MaPhongBan, MaKhuVuc FROM [dbo].[PHONGBAN] WHERE MaPhongBan = @MaPhongBan`
           );
-        const pbRow = pbCheck.recordset[0];
-        if (!pbRow) {
-          return res.status(404).json({ message: "Không tìm thấy phòng ban!" });
-        }
-        const maKhuVuc = pbRow.MaKhuVuc.trim();
+
+        const pbRow = pbResult.recordset[0];
         const cleanAllowedKhuVuc = allowedKhuVuc.map((k) => k.trim());
         const cleanAllowedPhongBan = allowedPhongBan.map((p) => p.trim());
-        if (
-          !cleanAllowedPhongBan.includes(maPhongBan.trim()) &&
-          !cleanAllowedKhuVuc.includes(maKhuVuc)
-        ) {
+        const hasPermission =
+          pbRow &&
+          ((pbRow.MaPhongBan && cleanAllowedPhongBan.includes(pbRow.MaPhongBan.trim())) ||
+            (pbRow.MaKhuVuc && cleanAllowedKhuVuc.includes(pbRow.MaKhuVuc.trim())));
+
+        if (!hasPermission) {
           return res.status(403).json({
-            message: "Bạn không có quyền truy cập dữ liệu của phòng ban này!",
+            message: `Bạn không có quyền xem dữ liệu của phòng ban này!`,
           });
         }
       }
@@ -461,82 +609,15 @@ app.get("/api/bao-cao/phong-ban", authenticate, async (req, res) => {
     let employees = [];
     let rawCheckins = [];
 
-    // EMPLOYEE CODE SEARCH PATH
-    if (searchCode) {
-      if (!/^\d+$/.test(searchCode)) {
-        return res.status(400).json({ message: "Mã chấm công không hợp lệ!" });
-      }
-      const codeNum = Number(searchCode);
-
-      // Query employee with exact code match
-      const empResult = await pool
-        .request()
-        .input("MaChamCong", sql.Int, codeNum).query(`
-          SELECT nv.MaChamCong, nv.TenNhanVien, pb.MaPhongBan, pb.MaKhuVuc, kv.TenKhuVuc
-          FROM [dbo].[NHANVIEN] nv
-          LEFT JOIN [dbo].[PHONGBAN] pb ON nv.MaPhongBan = pb.MaPhongBan
-          LEFT JOIN [dbo].[KHUVUC] kv ON pb.MaKhuVuc = kv.MaKhuVuc
-          WHERE nv.MaChamCong = @MaChamCong
-        `);
-
-      if (empResult.recordset.length === 0) {
-        return res.json([]); // No matching employee
-      }
-
-      const employee = empResult.recordset[0];
-
-      // Manager authorization check
-      if (isManager && !isAdmin) {
-        const empKhuVuc = employee.MaKhuVuc ? employee.MaKhuVuc.trim() : null;
-        const empPhongBan = employee.MaPhongBan
-          ? employee.MaPhongBan.trim()
-          : null;
-        const cleanAllowedKhuVuc = allowedKhuVuc.map((k) => k.trim());
-        const cleanAllowedPhongBan = allowedPhongBan.map((p) => p.trim());
-
-        const hasAccess =
-          (empPhongBan && cleanAllowedPhongBan.includes(empPhongBan)) ||
-          (empKhuVuc && cleanAllowedKhuVuc.includes(empKhuVuc));
-
-        if (!hasAccess) {
-          return res.status(403).json({
-            message: "Bạn không có quyền xem dữ liệu nhân viên này!",
-          });
-        }
-      }
-
-      employees = empResult.recordset;
-
-      // Fetch check-ins for this employee
-      const checkinsResult = await pool
-        .request()
-        .input("MaChamCong", sql.Int, codeNum)
-        .input("TuNgay", sql.VarChar(10), tuNgay)
-        .input("DenNgay", sql.VarChar(10), denNgay).query(`
-          SELECT c.MaChamCong, c.NgayCham, c.GioCham, c.MaSoMay, c.TenMay
-          FROM [dbo].[CheckInOut] c
-          WHERE c.MaChamCong = @MaChamCong
-            AND c.NgayCham BETWEEN CAST(@TuNgay AS DATE) AND CAST(@DenNgay AS DATE)
-          ORDER BY c.GioCham ASC
-        `);
-      rawCheckins = checkinsResult.recordset;
-    } else {
-      // DEPARTMENT MODE PATH
-      if (!maPhongBan) {
-        return res.status(400).json({ message: "Thiếu mã phòng ban!" });
-      }
-
-      // Hỗ trợ truy vấn toàn bộ phòng ban trong Xí nghiệp
-      // Hỗ trợ truy vấn toàn bộ phòng ban trong Xí nghiệp/Khu vực
-      let maPhongBanList = [];
+    // 1. Xác định danh sách phòng ban nếu người dùng có chọn Phòng ban / Xí nghiệp
+    let maPhongBanList = [];
+    if (maPhongBan) {
       if (maPhongBan === "ALL") {
         if (!xiNghiep) {
           return res.status(400).json({
             message: "Thiếu tên Khu vực/Xí nghiệp khi chọn tất cả phòng ban!",
           });
         }
-
-        // Lấy tất cả phòng ban trực thuộc TenKhuVuc được chọn
         const depResult = await pool
           .request()
           .input("TenKhuVuc", sql.NVarChar(100), xiNghiep).query(`
@@ -549,42 +630,119 @@ app.get("/api/bao-cao/phong-ban", authenticate, async (req, res) => {
       } else {
         maPhongBanList = [maPhongBan.trim()];
       }
+    }
 
-      // 1. Lấy toàn bộ nhân viên thuộc các phòng ban này (Bổ sung thông tin Khu vực)
-      const paramNames = maPhongBanList.map((_, i) => `@pb${i}`);
-      const employeesRequest = pool.request();
-      maPhongBanList.forEach((pb, i) => {
-        employeesRequest.input(`pb${i}`, sql.VarChar(50), pb);
+    // 2. Phân tách danh sách mã nhân viên nhập vào (nếu có)
+    const numCodes = [];
+    const strCodes = [];
+    if (searchCode) {
+      const rawCodes = searchCode
+        .split(/[,;\s\n]+/)
+        .map((c) => c.trim())
+        .filter((c) => c !== "");
+
+      for (const code of rawCodes) {
+        if (/^\d+$/.test(code)) {
+          const num = Number(code);
+          if (!numCodes.includes(num)) numCodes.push(num);
+          if (!strCodes.includes(code)) strCodes.push(code);
+        }
+      }
+
+      if (numCodes.length === 0 && strCodes.length === 0) {
+        return res.status(400).json({ message: "Mã chấm công không hợp lệ!" });
+      }
+    }
+
+    if (maPhongBanList.length === 0 && numCodes.length === 0 && strCodes.length === 0) {
+      return res.status(400).json({ message: "Vui lòng chọn phòng ban hoặc nhập mã chấm công!" });
+    }
+
+    // 3. Xây dựng câu truy vấn SQL lấy danh sách nhân viên (Ưu tiên Phòng Ban trước, sau đó lọc Mã NV)
+    const empReq = pool.request();
+    const whereClauses = [];
+
+    if (maPhongBanList.length > 0) {
+      const pbParams = maPhongBanList.map((pb, i) => {
+        empReq.input(`pb${i}`, sql.VarChar(50), pb);
+        return `@pb${i}`;
+      });
+      whereClauses.push(`nv.MaPhongBan IN (${pbParams.join(", ")})`);
+    }
+
+    if (numCodes.length > 0 || strCodes.length > 0) {
+      const codeParams = [];
+      numCodes.forEach((num, i) => {
+        empReq.input(`n${i}`, sql.Int, num);
+        codeParams.push(`@n${i}`);
+      });
+      strCodes.forEach((str, i) => {
+        empReq.input(`s${i}`, sql.NVarChar(50), str);
+        codeParams.push(`@s${i}`);
+      });
+      whereClauses.push(`nv.MaChamCong IN (${codeParams.join(", ")})`);
+    }
+
+    const empResult = await empReq.query(`
+      SELECT nv.MaChamCong, nv.TenNhanVien, pb.MaPhongBan, pb.MaKhuVuc, kv.TenKhuVuc
+      FROM [dbo].[NHANVIEN] nv
+      LEFT JOIN [dbo].[PHONGBAN] pb ON nv.MaPhongBan = pb.MaPhongBan
+      LEFT JOIN [dbo].[KHUVUC] kv ON pb.MaKhuVuc = kv.MaKhuVuc
+      WHERE ${whereClauses.join(" AND ")}
+      ORDER BY nv.TenNhanVien ASC
+    `);
+
+    if (empResult.recordset.length === 0) {
+      return res.json([]);
+    }
+
+    let filteredEmployees = empResult.recordset;
+
+    // Manager authorization check
+    if (isManager && !isAdmin) {
+      const cleanAllowedKhuVuc = allowedKhuVuc.map((k) => k.trim());
+      const cleanAllowedPhongBan = allowedPhongBan.map((p) => p.trim());
+
+      filteredEmployees = filteredEmployees.filter((emp) => {
+        const empKhuVuc = emp.MaKhuVuc ? emp.MaKhuVuc.trim() : null;
+        const empPhongBan = emp.MaPhongBan ? emp.MaPhongBan.trim() : null;
+        return (
+          (empPhongBan && cleanAllowedPhongBan.includes(empPhongBan)) ||
+          (empKhuVuc && cleanAllowedKhuVuc.includes(empKhuVuc))
+        );
       });
 
-      const employeesResult = await employeesRequest.query(`
-            SELECT nv.MaChamCong, nv.TenNhanVien, pb.MaKhuVuc, kv.TenKhuVuc
-            FROM [dbo].[NHANVIEN] nv
-            LEFT JOIN [dbo].[PHONGBAN] pb ON nv.MaPhongBan = pb.MaPhongBan
-            LEFT JOIN [dbo].[KHUVUC] kv ON pb.MaKhuVuc = kv.MaKhuVuc
-            WHERE nv.MaPhongBan IN (${paramNames.join(", ")})
-            ORDER BY nv.TenNhanVien ASC
-        `);
-      employees = employeesResult.recordset;
+      if (filteredEmployees.length === 0) {
+        return res.status(403).json({
+          message: "Bạn không có quyền xem dữ liệu của các nhân viên này!",
+        });
+      }
+    }
 
-      // 2. Lấy dữ liệu chấm công thô từ CheckInOut cho các nhân viên này trong khoảng ngày
-      const checkinsRequest = pool
+    employees = filteredEmployees;
+
+    // 4. Lấy dữ liệu chấm công từ CheckInOut cho danh sách nhân viên đã được lọc
+    const validEmpCodes = employees.map((e) => e.MaChamCong);
+    if (validEmpCodes.length > 0) {
+      const checkinsReq = pool
         .request()
         .input("TuNgay", sql.VarChar(10), tuNgay)
         .input("DenNgay", sql.VarChar(10), denNgay);
 
-      maPhongBanList.forEach((pb, i) => {
-        checkinsRequest.input(`pb${i}`, sql.VarChar(50), pb);
+      const checkinCodeParams = [];
+      validEmpCodes.forEach((code, i) => {
+        // Handle potential number vs string types
+        checkinsReq.input(`c${i}`, sql.Int, Number(code));
+        checkinCodeParams.push(`@c${i}`);
       });
 
-      const checkinsResult = await checkinsRequest.query(`
-            SELECT c.MaChamCong, c.NgayCham, c.GioCham, c.MaSoMay, c.TenMay
-            FROM [dbo].[CheckInOut] c
-            INNER JOIN [dbo].[NHANVIEN] nv ON c.MaChamCong = nv.MaChamCong
-            WHERE nv.MaPhongBan IN (${paramNames.join(", ")})
-              AND c.NgayCham BETWEEN CAST(@TuNgay AS DATE) AND CAST(@DenNgay AS DATE)
-            ORDER BY c.GioCham ASC
-        `);
+      const checkinsResult = await checkinsReq.query(`
+        SELECT c.MaChamCong, c.NgayCham, c.GioCham, c.MaSoMay, c.TenMay
+        FROM [dbo].[CheckInOut] c
+        WHERE c.MaChamCong IN (${checkinCodeParams.join(", ")})
+          AND c.NgayCham BETWEEN CAST(@TuNgay AS DATE) AND CAST(@DenNgay AS DATE)
+        ORDER BY c.GioCham ASC
+      `);
       rawCheckins = checkinsResult.recordset;
     }
 

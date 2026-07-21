@@ -211,7 +211,7 @@ export default function App() {
         } else {
           alert(
             "Lỗi tải danh mục phòng ban: " +
-              (err.response?.data?.message || err.message),
+            (err.response?.data?.message || err.message),
           );
         }
       });
@@ -245,11 +245,12 @@ export default function App() {
     }
 
     const params = new URLSearchParams({ tuNgay, denNgay });
-    if (maChamCong) {
-      params.set("maChamCong", maChamCong);
-    } else {
+    if (selectedPhong) {
       params.set("maPhongBan", selectedPhong);
       params.set("xiNghiep", selectedXiNghiep || "");
+    }
+    if (maChamCong) {
+      params.set("maChamCong", maChamCong);
     }
 
     axios
@@ -263,7 +264,7 @@ export default function App() {
       .catch((err) => {
         alert(
           "Lỗi khi xem báo cáo: " +
-            (err.response?.data?.message || err.message),
+          (err.response?.data?.message || err.message),
         );
       });
   };
@@ -314,7 +315,7 @@ export default function App() {
       .catch((err) => {
         alert(
           "Lỗi khi cập nhật: " +
-            (err.response?.data?.message || err.message),
+          (err.response?.data?.message || err.message),
         );
       });
   };
@@ -361,8 +362,8 @@ export default function App() {
           selectedPhong === "ALL"
             ? selectedXiNghiep.replace(/\s+/g, "-")
             : phongBans
-                .find((p) => p.MaPhongBan === selectedPhong)
-                ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong;
+              .find((p) => p.MaPhongBan === selectedPhong)
+              ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong;
 
         link.setAttribute(
           "download",
@@ -397,8 +398,8 @@ export default function App() {
           selectedPhong === "ALL"
             ? selectedXiNghiep.replace(/\s+/g, "-")
             : phongBans
-                .find((p) => p.MaPhongBan === selectedPhong)
-                ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong;
+              .find((p) => p.MaPhongBan === selectedPhong)
+              ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong;
 
         link.setAttribute(
           "download",
@@ -475,7 +476,7 @@ export default function App() {
       .catch((err) =>
         alert(
           "Lỗi khi cập nhật phân quyền: " +
-            (err.response?.data?.message || err.message),
+          (err.response?.data?.message || err.message),
         ),
       );
   };
@@ -523,7 +524,7 @@ export default function App() {
       .catch((err) =>
         alert(
           "Lỗi khi tạo tài khoản: " +
-            (err.response?.data?.message || err.message),
+          (err.response?.data?.message || err.message),
         ),
       );
   };
@@ -710,10 +711,11 @@ export default function App() {
                   <label>Mã nhân viên</label>
                   <input
                     type="text"
-                    placeholder="Nhập mã nhân viên để tìm kiếm..."
+                    placeholder="VD: 1001, 1002, 1003..."
                     value={maChamCongSearch}
                     onChange={(e) => setMaChamCongSearch(e.target.value)}
                     className="filter-input"
+                    title="Nhập 1 hoặc nhiều mã nhân viên cách nhau bằng dấu phẩy, chấm phẩy hoặc khoảng trắng"
                   />
                 </div>
 
@@ -1006,7 +1008,7 @@ export default function App() {
           <>
             {/* Thanh Tab phụ quản lý phân quyền & logs */}
             <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', borderBottom: '1px solid #e5e7eb', paddingBottom: '2px' }}>
-              <button 
+              <button
                 onClick={() => setAuthSubTab('accounts')}
                 style={{
                   cursor: 'pointer',
@@ -1023,7 +1025,7 @@ export default function App() {
                 Tài khoản & Phân quyền
               </button>
               {userRoles.includes('Admin') && (
-                <button 
+                <button
                   onClick={() => setAuthSubTab('logs')}
                   style={{
                     cursor: 'pointer',
@@ -1107,10 +1109,10 @@ export default function App() {
                           let parsedPBs = [];
                           try {
                             parsedKVs = JSON.parse(u.AllowedKhuVuc || "[]");
-                          } catch (e) {}
+                          } catch (e) { }
                           try {
                             parsedPBs = JSON.parse(u.AllowedPhongBan || "[]");
-                          } catch (e) {}
+                          } catch (e) { }
 
                           const isUserAdmin = u.roles.some(
                             (r) => r.roleName === "Admin",
@@ -1216,12 +1218,12 @@ export default function App() {
                                     transition: "all 0.15s ease",
                                   }}
                                   onMouseOver={(e) =>
-                                    (e.currentTarget.style.backgroundColor =
-                                      "#f9fafb")
+                                  (e.currentTarget.style.backgroundColor =
+                                    "#f9fafb")
                                   }
                                   onMouseOut={(e) =>
-                                    (e.currentTarget.style.backgroundColor =
-                                      "#ffffff")
+                                  (e.currentTarget.style.backgroundColor =
+                                    "#ffffff")
                                   }
                                 >
                                   Chỉnh sửa
@@ -1479,9 +1481,9 @@ export default function App() {
                           phongBans.map((p) =>
                             p.MaKhuVuc && p.TenKhuVuc
                               ? JSON.stringify({
-                                  MaKhuVuc: p.MaKhuVuc.trim(),
-                                  TenKhuVuc: p.TenKhuVuc.trim(),
-                                })
+                                MaKhuVuc: p.MaKhuVuc.trim(),
+                                TenKhuVuc: p.TenKhuVuc.trim(),
+                              })
                               : "",
                           ),
                         ),
@@ -1913,9 +1915,9 @@ export default function App() {
                             phongBans.map((p) =>
                               p.MaKhuVuc && p.TenKhuVuc
                                 ? JSON.stringify({
-                                    MaKhuVuc: p.MaKhuVuc.trim(),
-                                    TenKhuVuc: p.TenKhuVuc.trim(),
-                                  })
+                                  MaKhuVuc: p.MaKhuVuc.trim(),
+                                  TenKhuVuc: p.TenKhuVuc.trim(),
+                                })
                                 : "",
                             ),
                           ),
