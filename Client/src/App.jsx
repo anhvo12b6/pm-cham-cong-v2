@@ -60,6 +60,8 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 20;
 
+  const [showExportOptions, setShowExportOptions] = useState(false);
+
   // Filter nâng cao báo cáo
   const [filterTrangThai, setFilterTrangThai] = useState("all");
   const [maChamCongSearch, setMaChamCongSearch] = useState("");
@@ -232,10 +234,16 @@ export default function App() {
       if (filtered.length === 1) {
         setSelectedPhong(filtered[0].MaPhongBan);
       } else {
-        setSelectedPhong("");
+        setSelectedPhong("ALL");
       }
     }
   }, [selectedXiNghiep, phongBans]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") {
+      fetchReport();
+    }
+  };
 
   // Gọi API lấy báo cáo công (lấy dữ liệu gốc, filter sẽ xử lý ở frontend)
   const fetchReport = () => {
@@ -267,6 +275,16 @@ export default function App() {
           (err.response?.data?.message || err.message),
         );
       });
+  };
+
+  const handleClear = () => {
+    setReportData([]);
+    setMaChamCongSearch("");
+    setSelectedXiNghiep("");
+    setSelectedPhong("");
+    setTuNgay(formatDate(FirstDayPreviousMonth));
+    setDenNgay(formatDate(today));
+    setFilterTrangThai("all");
   };
 
   // Bắt đầu chỉnh sửa dòng
@@ -343,11 +361,31 @@ export default function App() {
   }, [reportData, filterTrangThai]);
 
   // Xuất báo cáo công ra file Excel chuẩn biểu mẫu
-  const handleExportExcel = () => {
-    if (!selectedPhong) return alert("Vui lòng chọn phòng ban!");
+  const handleExportExcel = (mode = "current_page") => {
+    const maChamCong = maChamCongSearch.trim();
+    if (!maChamCong && !selectedPhong) return alert("Vui lòng chọn phòng ban hoặc nhập mã chấm công!");
+
+    let uniqueMaChamCongs = [];
+    if (mode === "current_page") {
+      uniqueMaChamCongs = [...new Set(currentItems.map(item => item.MaChamCong))];
+      if (uniqueMaChamCongs.length === 0) {
+        return alert("Không có dữ liệu trên trang hiện hành để xuất!");
+      }
+    }
+
+    const params = new URLSearchParams({ tuNgay, denNgay });
+    if (selectedPhong) {
+      params.set("maPhongBan", selectedPhong);
+      params.set("xiNghiep", selectedXiNghiep || "");
+    }
+    if (maChamCong) {
+      params.set("maChamCong", maChamCong);
+    }
+
     axios
-      .get(
-        `${API_BASE}/api/bao-cao/export-excel?maPhongBan=${selectedPhong}&xiNghiep=${selectedXiNghiep}&tuNgay=${tuNgay}&denNgay=${denNgay}`,
+      .post(
+        `${API_BASE}/api/bao-cao/export-excel?${params.toString()}`,
+        { maChamCongs: uniqueMaChamCongs },
         {
           headers: { Authorization: `Bearer ${token}` },
           responseType: "blob",
@@ -358,12 +396,13 @@ export default function App() {
         const link = document.createElement("a");
         link.href = url;
 
-        const pbName =
-          selectedPhong === "ALL"
-            ? selectedXiNghiep.replace(/\s+/g, "-")
-            : phongBans
-              .find((p) => p.MaPhongBan === selectedPhong)
-              ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong;
+        const pbName = selectedPhong
+          ? (selectedPhong === "ALL"
+              ? selectedXiNghiep.replace(/\s+/g, "-")
+              : phongBans
+                  .find((p) => p.MaPhongBan === selectedPhong)
+                  ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong)
+          : "Theo-MaNV";
 
         link.setAttribute(
           "download",
@@ -380,10 +419,21 @@ export default function App() {
 
   // Xuất chi tiết chấm công ra file Excel dạng danh sách từng ngày
   const handleExportExcelDetail = () => {
-    if (!selectedPhong) return alert("Vui lòng chọn phòng ban!");
+    const maChamCong = maChamCongSearch.trim();
+    if (!maChamCong && !selectedPhong) return alert("Vui lòng chọn phòng ban hoặc nhập mã chấm công!");
+
+    const params = new URLSearchParams({ tuNgay, denNgay });
+    if (selectedPhong) {
+      params.set("maPhongBan", selectedPhong);
+      params.set("xiNghiep", selectedXiNghiep || "");
+    }
+    if (maChamCong) {
+      params.set("maChamCong", maChamCong);
+    }
+
     axios
       .get(
-        `${API_BASE}/api/bao-cao/export-excel-detail?maPhongBan=${selectedPhong}&xiNghiep=${selectedXiNghiep}&tuNgay=${tuNgay}&denNgay=${denNgay}`,
+        `${API_BASE}/api/bao-cao/export-excel-detail?${params.toString()}`,
         {
           headers: { Authorization: `Bearer ${token}` },
           responseType: "blob",
@@ -394,12 +444,13 @@ export default function App() {
         const link = document.createElement("a");
         link.href = url;
 
-        const pbName =
-          selectedPhong === "ALL"
-            ? selectedXiNghiep.replace(/\s+/g, "-")
-            : phongBans
-              .find((p) => p.MaPhongBan === selectedPhong)
-              ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong;
+        const pbName = selectedPhong
+          ? (selectedPhong === "ALL"
+              ? selectedXiNghiep.replace(/\s+/g, "-")
+              : phongBans
+                  .find((p) => p.MaPhongBan === selectedPhong)
+                  ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong)
+          : "Theo-MaNV";
 
         link.setAttribute(
           "download",
@@ -411,6 +462,118 @@ export default function App() {
       })
       .catch((err) => {
         alert("Lỗi khi xuất chi tiết chấm công: " + err.message);
+      });
+  };
+
+  // Xuất phòng ban lấy mã NV và Tên nhân viên
+  const handleExportDepartment = (mode = "all_pages") => {
+    let dataToExport = mode === "current_page" ? currentItems : reportData;
+    if (mode === "current_page" && currentItems.length === 0) {
+      return alert("Không có dữ liệu trên trang hiện hành để xuất!");
+    }
+
+    const employeeMap = {};
+    dataToExport.forEach(item => {
+      if (item.MaChamCong && item.TenNhanVien) {
+        employeeMap[item.MaChamCong] = item.TenNhanVien;
+      }
+    });
+
+    const employees = Object.entries(employeeMap).map(([maChamCong, tenNhanVien]) => ({
+      maChamCong,
+      tenNhanVien
+    }));
+
+    if (employees.length === 0) {
+      return alert("Không có dữ liệu nhân viên để xuất!");
+    }
+
+    axios
+      .post(
+        `${API_BASE}/api/bao-cao/export-excel-ds-nhan-vien`,
+        { employees },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: "blob",
+        }
+      )
+      .then((res) => {
+        const url = window.URL.createObjectURL(new Blob([res.data]));
+        const link = document.createElement("a");
+        link.href = url;
+
+        const pbName = selectedPhong
+          ? (selectedPhong === "ALL"
+              ? selectedXiNghiep.replace(/\s+/g, "-")
+              : phongBans
+                  .find((p) => p.MaPhongBan === selectedPhong)
+                  ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong)
+          : "Theo-MaNV";
+
+        link.setAttribute("download", `PB_${pbName}.xlsx`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      })
+      .catch((err) => {
+        alert("Lỗi khi xuất danh sách nhân viên: " + err.message);
+      });
+  };
+
+  // Xuất file Excel THACO dựa trên file mẫu ImportWorkDayDailyTemplate.xlsx
+  const handleExportExcelThaco = (mode = "current_page") => {
+    const maChamCong = maChamCongSearch.trim();
+    if (!maChamCong && !selectedPhong) return alert("Vui lòng chọn phòng ban hoặc nhập mã chấm công!");
+
+    let uniqueMaChamCongs = [];
+    if (mode === "current_page") {
+      uniqueMaChamCongs = [...new Set(currentItems.map(item => item.MaChamCong))];
+      if (uniqueMaChamCongs.length === 0) {
+        return alert("Không có dữ liệu trên trang hiện hành để xuất!");
+      }
+    }
+
+    const params = new URLSearchParams({ tuNgay, denNgay });
+    if (selectedPhong) {
+      params.set("maPhongBan", selectedPhong);
+      params.set("xiNghiep", selectedXiNghiep || "");
+    }
+    if (maChamCong) {
+      params.set("maChamCong", maChamCong);
+    }
+
+    axios
+      .post(
+        `${API_BASE}/api/bao-cao/export-excel-thaco?${params.toString()}`,
+        { maChamCongs: uniqueMaChamCongs },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: "blob",
+        },
+      )
+      .then((res) => {
+        const url = window.URL.createObjectURL(new Blob([res.data]));
+        const link = document.createElement("a");
+        link.href = url;
+
+        const pbName = selectedPhong
+          ? (selectedPhong === "ALL"
+              ? selectedXiNghiep.replace(/\s+/g, "-")
+              : phongBans
+                  .find((p) => p.MaPhongBan === selectedPhong)
+                  ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong)
+          : "Theo-MaNV";
+
+        link.setAttribute(
+          "download",
+          `ImportWorkDayDaily-${pbName}-${tuNgay}-den-${denNgay}.xlsx`,
+        );
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      })
+      .catch((err) => {
+        alert("Lỗi khi xuất file Excel THACO: " + err.message);
       });
   };
 
@@ -653,8 +816,17 @@ export default function App() {
                   ) : (
                     <select
                       value={selectedXiNghiep}
-                      onChange={(e) => setSelectedXiNghiep(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSelectedXiNghiep(val);
+                        if (val) {
+                          setSelectedPhong("ALL");
+                        } else {
+                          setSelectedPhong("");
+                        }
+                      }}
                       className="filter-select"
+                      onKeyDown={handleKeyDown}
                     >
                       <option value="">-- Chọn xí nghiệp --</option>
                       {xiNghiepList.map((xn) => (
@@ -680,8 +852,11 @@ export default function App() {
                       onChange={(e) => setSelectedPhong(e.target.value)}
                       className="filter-select"
                       disabled={!selectedXiNghiep}
+                      onKeyDown={handleKeyDown}
                     >
-                      <option value="">-- Chọn phòng ban --</option>
+                      {!selectedXiNghiep && (
+                        <option value="">-- Chọn phòng ban --</option>
+                      )}
                       {selectedXiNghiep &&
                         (!isManagerOnly ||
                           allowedKhuVuc
@@ -716,6 +891,7 @@ export default function App() {
                     onChange={(e) => setMaChamCongSearch(e.target.value)}
                     className="filter-input"
                     title="Nhập 1 hoặc nhiều mã nhân viên cách nhau bằng dấu phẩy, chấm phẩy hoặc khoảng trắng"
+                    onKeyDown={handleKeyDown}
                   />
                 </div>
 
@@ -726,6 +902,7 @@ export default function App() {
                     value={tuNgay}
                     onChange={(e) => setTuNgay(e.target.value)}
                     className="filter-input"
+                    onKeyDown={handleKeyDown}
                   />
                 </div>
 
@@ -736,6 +913,7 @@ export default function App() {
                     value={denNgay}
                     onChange={(e) => setDenNgay(e.target.value)}
                     className="filter-input"
+                    onKeyDown={handleKeyDown}
                   />
                 </div>
 
@@ -745,6 +923,7 @@ export default function App() {
                     value={filterTrangThai}
                     onChange={(e) => setFilterTrangThai(e.target.value)}
                     className="filter-select"
+                    onKeyDown={handleKeyDown}
                   >
                     <option value="all">-- Tất cả trạng thái --</option>
                     <option value="dung_gio">Đúng giờ</option>
@@ -754,25 +933,69 @@ export default function App() {
                   </select>
                 </div>
 
-                <button onClick={fetchReport} className="btn-success">
-                  Xem báo cáo
-                </button>
-                <button onClick={handleExportExcel} className="btn-excel">
-                  Xuất Excel
-                </button>
-                <button
-                  onClick={handleExportExcelDetail}
-                  className="btn-excel"
-                  style={{ backgroundColor: "#0284c7" }}
-                  onMouseOver={(e) =>
-                    (e.currentTarget.style.backgroundColor = "#0369a1")
-                  }
-                  onMouseOut={(e) =>
-                    (e.currentTarget.style.backgroundColor = "#0284c7")
-                  }
-                >
-                  Xuất Chi Tiết
-                </button>
+                <div style={{ display: 'flex', gap: '16px', marginLeft: 'auto', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
+                  {showExportOptions && (
+                    <>
+                      <div className="reveal-btn-container">
+                        <div className="reveal-btn-main">
+                          <span>Xuất Excel</span>
+                          <span className="chevron">▼</span>
+                        </div>
+                        <div className="reveal-actions-panel">
+                          <button className="reveal-action-item export-current" onClick={() => handleExportExcel('current_page')}>Xuất trang hiện tại</button>
+                          <button className="reveal-action-item export-all" onClick={() => handleExportExcel('all_pages')}>Xuất tất cả</button>
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleExportExcelDetail}
+                        className="btn-excel"
+                        style={{ backgroundColor: "#0284c7" }}
+                        onMouseOver={(e) =>
+                          (e.currentTarget.style.backgroundColor = "#0369a1")
+                        }
+                        onMouseOut={(e) =>
+                          (e.currentTarget.style.backgroundColor = "#0284c7")
+                        }
+                      >
+                        Xuất Chi Tiết
+                      </button>
+                      <div className="reveal-btn-container thaco">
+                        <div className="reveal-btn-main">
+                          <span>Xuất Excel THACO</span>
+                          <span className="chevron">▼</span>
+                        </div>
+                        <div className="reveal-actions-panel">
+                          <button className="reveal-action-item export-current" onClick={() => handleExportExcelThaco('current_page')}>Xuất trang hiện tại</button>
+                          <button className="reveal-action-item export-all" onClick={() => handleExportExcelThaco('all_pages')}>Xuất tất cả</button>
+                        </div>
+                      </div>
+                      <div className="reveal-btn-container">
+                        <div className="reveal-btn-main" style={{ backgroundColor: "#10b981" }}>
+                          <span>Xuất phòng ban</span>
+                          <span className="chevron">▼</span>
+                        </div>
+                        <div className="reveal-actions-panel">
+                          <button className="reveal-action-item export-current" onClick={() => handleExportDepartment('current_page')}>Xuất trang hiện tại</button>
+                          <button className="reveal-action-item export-all" onClick={() => handleExportDepartment('all_pages')}>Xuất tất cả</button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  <button 
+                    onClick={() => setShowExportOptions(!showExportOptions)} 
+                    className="btn-success"
+                    style={{ backgroundColor: "#4b5563", width: "95px", display: "inline-flex", justifyContent: "center" }}
+                    title="Ẩn/hiện các nút xuất dữ liệu"
+                  >
+                    {showExportOptions ? "Ẩn ⬅" : "Add ➡"}
+                  </button>
+                  <button onClick={fetchReport} className="btn-success">
+                    Xem báo cáo
+                  </button>
+                  <button onClick={handleClear} className="btn-success" style={{ backgroundColor: "#ef4444", borderColor: "#ef4444" }}>
+                    Clear
+                  </button>
+                </div>
               </div>
             </div>
 
