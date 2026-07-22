@@ -933,7 +933,21 @@ export default function App() {
                   </select>
                 </div>
 
-                <div style={{ display: 'flex', gap: '16px', marginLeft: 'auto', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button onClick={fetchReport} className="btn-success">
+                    Xem báo cáo
+                  </button>
+                  <button onClick={handleClear} className="btn-success" style={{ backgroundColor: "#ef4444", borderColor: "#ef4444" }}>
+                    Clear
+                  </button>
+                  <button 
+                    onClick={() => setShowExportOptions(!showExportOptions)} 
+                    className="btn-success"
+                    style={{ backgroundColor: "#4b5563", width: "95px", display: "inline-flex", justifyContent: "center" }}
+                    title="Ẩn/hiện các nút xuất dữ liệu"
+                  >
+                    {showExportOptions ? "Ẩn ⬅" : "Add ➡"}
+                  </button>
                   {showExportOptions && (
                     <>
                       <div className="reveal-btn-container">
@@ -981,20 +995,6 @@ export default function App() {
                       </div>
                     </>
                   )}
-                  <button 
-                    onClick={() => setShowExportOptions(!showExportOptions)} 
-                    className="btn-success"
-                    style={{ backgroundColor: "#4b5563", width: "95px", display: "inline-flex", justifyContent: "center" }}
-                    title="Ẩn/hiện các nút xuất dữ liệu"
-                  >
-                    {showExportOptions ? "Ẩn ⬅" : "Add ➡"}
-                  </button>
-                  <button onClick={fetchReport} className="btn-success">
-                    Xem báo cáo
-                  </button>
-                  <button onClick={handleClear} className="btn-success" style={{ backgroundColor: "#ef4444", borderColor: "#ef4444" }}>
-                    Clear
-                  </button>
                 </div>
               </div>
             </div>
