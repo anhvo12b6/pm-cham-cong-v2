@@ -398,10 +398,10 @@ export default function App() {
 
         const pbName = selectedPhong
           ? (selectedPhong === "ALL"
-              ? selectedXiNghiep.replace(/\s+/g, "-")
-              : phongBans
-                  .find((p) => p.MaPhongBan === selectedPhong)
-                  ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong)
+            ? selectedXiNghiep.replace(/\s+/g, "-")
+            : phongBans
+              .find((p) => p.MaPhongBan === selectedPhong)
+              ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong)
           : "Theo-MaNV";
 
         link.setAttribute(
@@ -446,10 +446,10 @@ export default function App() {
 
         const pbName = selectedPhong
           ? (selectedPhong === "ALL"
-              ? selectedXiNghiep.replace(/\s+/g, "-")
-              : phongBans
-                  .find((p) => p.MaPhongBan === selectedPhong)
-                  ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong)
+            ? selectedXiNghiep.replace(/\s+/g, "-")
+            : phongBans
+              .find((p) => p.MaPhongBan === selectedPhong)
+              ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong)
           : "Theo-MaNV";
 
         link.setAttribute(
@@ -504,10 +504,10 @@ export default function App() {
 
         const pbName = selectedPhong
           ? (selectedPhong === "ALL"
-              ? selectedXiNghiep.replace(/\s+/g, "-")
-              : phongBans
-                  .find((p) => p.MaPhongBan === selectedPhong)
-                  ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong)
+            ? selectedXiNghiep.replace(/\s+/g, "-")
+            : phongBans
+              .find((p) => p.MaPhongBan === selectedPhong)
+              ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong)
           : "Theo-MaNV";
 
         link.setAttribute("download", `PB_${pbName}.xlsx`);
@@ -558,10 +558,10 @@ export default function App() {
 
         const pbName = selectedPhong
           ? (selectedPhong === "ALL"
-              ? selectedXiNghiep.replace(/\s+/g, "-")
-              : phongBans
-                  .find((p) => p.MaPhongBan === selectedPhong)
-                  ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong)
+            ? selectedXiNghiep.replace(/\s+/g, "-")
+            : phongBans
+              .find((p) => p.MaPhongBan === selectedPhong)
+              ?.TenPhongBan.replace(/\s+/g, "-") || selectedPhong)
           : "Theo-MaNV";
 
         link.setAttribute(
@@ -934,22 +934,22 @@ export default function App() {
                 </div>
 
                 <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-                  <button onClick={fetchReport} className="btn-success">
-                    Xem báo cáo
-                  </button>
-                  <button onClick={handleClear} className="btn-success" style={{ backgroundColor: "#ef4444", borderColor: "#ef4444" }}>
-                    Clear
-                  </button>
-                  <button 
-                    onClick={() => setShowExportOptions(!showExportOptions)} 
+                  <button
+                    onClick={() => setShowExportOptions(!showExportOptions)}
                     className="btn-success"
-                    style={{ backgroundColor: "#4b5563", width: "95px", display: "inline-flex", justifyContent: "center" }}
-                    title="Ẩn/hiện các nút xuất dữ liệu"
+                    style={{ backgroundColor: "#4b5563", width: "55px", fontSize: "16px", display: "inline-flex", justifyContent: "center", padding: "0" }}
+                    title="Ẩn/hiện các thao tác"
                   >
-                    {showExportOptions ? "Ẩn ⬅" : "Add ➡"}
+                    {showExportOptions ? "⬅" : "➡"}
                   </button>
                   {showExportOptions && (
                     <>
+                      <button onClick={fetchReport} className="btn-success">
+                        Xem báo cáo
+                      </button>
+                      <button onClick={handleClear} className="btn-success" style={{ backgroundColor: "#ef4444", borderColor: "#ef4444" }}>
+                        Xóa bộ lọc
+                      </button>
                       <div className="reveal-btn-container">
                         <div className="reveal-btn-main">
                           <span>Xuất Excel</span>
